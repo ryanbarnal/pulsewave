@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#140b10">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="author" content="Ryan Ocbina Barnal">
+<title>Pulsewave</title>
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="logo.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<link rel="stylesheet" href="style.css">
+<script src="config.js"></script>
+</head>
+<body>
+
+<!-- ===== Animated intro ===== -->
+<div id="intro">
+  <canvas id="introCanvas"></canvas>
+  <div class="intro-content">
+    <div class="intro-logo-wrap">
+      <span class="ring r1"></span><span class="ring r2"></span><span class="ring r3"></span>
+      <img class="intro-logo" src="logo.svg" alt="">
+    </div>
+    <h1 class="intro-title" data-appname></h1>
+    <p class="intro-tag" data-tagline></p>
+    <button id="startBtn" class="start-btn">Tap to start</button>
+    <p class="intro-credit">Created by <strong data-credit></strong></p>
+  </div>
+</div>
+
+<!-- ===== App ===== -->
+<div id="app" class="hidden">
+  <header class="topbar">
+    <div class="brand"><img src="logo.svg" alt=""><span data-appname></span></div>
+    <div class="top-actions">
+      <button class="icon-btn" id="fullscreenBtn" title="Full-screen visuals (F)">⛶</button>
+      <button class="icon-btn" id="helpBtn" title="Help (H)">?</button>
+    </div>
+  </header>
+
+  <main>
+    <section class="stage">
+      <canvas id="viz"></canvas>
+      <div class="viz-modes" id="vizModes">
+        <button data-mode="bars" class="active">Bars</button>
+        <button data-mode="wave">Wave</button>
+        <button data-mode="radial">Radial</button>
+        <button data-mode="galaxy">Galaxy</button>
+        <button data-mode="tunnel">Tunnel</button>
+      </div>
+      <div class="theme-dots" id="themeDots"></div>
+      <div class="empty-hint" id="emptyHint">
+        <p>Drop music here or</p>
+        <label class="btn primary">Add music<input type="file" id="fileInput" accept="audio/*" multiple hidden></label>
+      </div>
+    </section>
+
+    <section class="player">
+      <div class="now">
+        <div class="art" id="art"><img src="logo.svg" alt=""></div>
+        <div class="meta">
+          <div class="title" id="trackTitle">No track loaded</div>
+          <div class="artist" id="trackArtist">Add songs to begin</div>
+        </div>
+      </div>
+      <div class="seek">
+        <span id="curTime">0:00</span>
+        <input type="range" id="seek" min="0" max="1000" value="0">
+        <span id="durTime">0:00</span>
+      </div>
+      <div class="controls">
+        <button class="ctl" id="shuffleBtn" title="Shuffle (S)">🔀</button>
+        <button class="ctl" id="prevBtn" title="Previous (←)">⏮</button>
+        <button class="ctl play" id="playBtn" title="Play / Pause (Space)">▶</button>
+        <button class="ctl" id="nextBtn" title="Next (→)">⏭</button>
+        <button class="ctl" id="repeatBtn" title="Repeat (R)">🔁</button>
+      </div>
+      <div class="vol">
+        <button class="ctl small" id="muteBtn" title="Mute (M)">🔊</button>
+        <input type="range" id="volume" min="0" max="100" value="80">
+      </div>
+    </section>
+
+    <section class="panels">
+      <div class="tabs">
+        <button data-tab="playlist" class="active">Playlist</button>
+        <button data-tab="eq">Equalizer</button>
+      </div>
+
+      <div class="panel" id="panel-playlist">
+        <div class="pl-actions">
+          <label class="btn">+ Add files<input type="file" id="fileInput2" accept="audio/*" multiple hidden></label>
+          <button class="btn" id="clearBtn">Clear</button>
+        </div>
+        <ol id="playlist"></ol>
+      </div>
+
+      <div class="panel hidden" id="panel-eq">
+        <div class="eq-top">
+          <label class="switch"><input type="checkbox" id="eqOn" checked><span></span> EQ on</label>
+          <select id="eqPreset"></select>
+          <button class="btn" id="eqReset">Reset</button>
+        </div>
+        <div class="eq-bands" id="eqBands"></div>
+        <div class="eq-extra">
+          <label>Bass boost <input type="range" id="bassBoost" min="0" max="12" value="0"></label>
+          <label>Balance <input type="range" id="balance" min="-100" max="100" value="0" title="Balance"></label>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="credit">
+    <span data-appname></span> v<span data-version></span> · Created by <strong data-credit></strong> · <a href="help.html" target="_blank">Manual</a> · <a href="download.html" target="_blank">Download</a>
+  </footer>
+</div>
+
+<!-- ===== Help modal ===== -->
+<div id="helpModal" class="modal hidden">
+  <div class="modal-box">
+    <button class="close" id="helpClose">✕</button>
+    <h2>Quick help</h2>
+    <ul>
+      <li><b>Add music:</b> press <em>Add music</em> or drag audio files onto the window.</li>
+      <li><b>Visual effects:</b> pick Bars, Wave, Radial, Galaxy or Tunnel. The colored dots change the theme.</li>
+      <li><b>Equalizer:</b> open the <em>Equalizer</em> tab, drag the 10 sliders or choose a preset.</li>
+      <li><b>Full-screen visuals:</b> press ⛶ or <kbd>F</kbd>.</li>
+    </ul>
+    <h3>Keyboard shortcuts</h3>
+    <table>
+      <tr><td><kbd>Space</kbd></td><td>Play / pause</td></tr>
+      <tr><td><kbd>←</kbd> <kbd>→</kbd></td><td>Previous / next track</td></tr>
+      <tr><td><kbd>Shift</kbd>+<kbd>←</kbd>/<kbd>→</kbd></td><td>Skip back / forward 10 s</td></tr>
+      <tr><td><kbd>↑</kbd> <kbd>↓</kbd></td><td>Volume up / down</td></tr>
+      <tr><td><kbd>M</kbd></td><td>Mute</td></tr>
+      <tr><td><kbd>S</kbd> / <kbd>R</kbd></td><td>Shuffle / repeat</td></tr>
+      <tr><td><kbd>V</kbd></td><td>Next visual effect</td></tr>
+      <tr><td><kbd>F</kbd></td><td>Full-screen visuals</td></tr>
+      <tr><td><kbd>H</kbd></td><td>This help</td></tr>
+    </table>
+    <p><a class="btn primary" href="help.html" target="_blank">Open full manual</a></p>
+    <p class="muted">Created by <strong data-credit></strong></p>
+  </div>
+</div>
+
+<div id="dropOverlay" class="hidden">Drop to add music</div>
+<script src="app.js"></script>
+</body>
+</html>

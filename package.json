@@ -1,0 +1,43 @@
+{
+  "name": "pulsewave",
+  "productName": "Pulsewave",
+  "version": "1.0.0",
+  "description": "Music player with visual effects and a 10-band equalizer",
+  "author": "Ryan Ocbina Barnal",
+  "license": "UNLICENSED",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dist:win": "electron-builder --win",
+    "dist:mac": "electron-builder --mac",
+    "serve": "npx --yes serve web"
+  },
+  "devDependencies": {
+    "electron": "^33.2.0",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "com.ryanbarnal.pulsewave",
+    "productName": "Pulsewave",
+    "copyright": "© 2026 Ryan Ocbina Barnal",
+    "files": ["main.js", "web/**/*", "!web/CNAME"],
+    "directories": { "output": "dist", "buildResources": "build" },
+    "win": { "target": [{ "target": "nsis", "arch": ["x64"] }], "icon": "build/icon.png" },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Pulsewave",
+      "artifactName": "Pulsewave-Setup.${ext}"
+    },
+    "mac": {
+      "target": [{ "target": "dmg", "arch": ["arm64", "x64"] }],
+      "category": "public.app-category.music",
+      "icon": "build/icon.png",
+      "artifactName": "Pulsewave-${arch}.${ext}"
+    },
+    "dmg": { "title": "Pulsewave" },
+    "publish": null
+  }
+}
