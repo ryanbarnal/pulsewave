@@ -17,25 +17,87 @@ $$("[data-tagline]").forEach(e => e.textContent = C.tagline);
 const it = $(".intro-title");
 it.innerHTML = [...C.name].map((ch, i) => `<span style="animation-delay:${0.6 + i * 0.08}s">${ch === " " ? "&nbsp;" : ch}</span>`).join("");
 
-/* ---------- Intro particles ---------- */
+/* ---------- Animated intro (5 styles, chosen in config.js) ---------- */
+const INTROS = ["rings", "equalizer", "wave", "glitch", "burst"];
+const qs = new URLSearchParams(location.search).get("intro");
+const introStyle = INTROS.includes(qs) ? qs : INTROS[+qs - 1] || (INTROS.includes(C.intro) ? C.intro : "rings");
+$("#intro").classList.add("intro-" + introStyle);
 const ic = $("#introCanvas"), ix = ic.getContext("2d");
-let introRunning = true;
-const dots = Array.from({ length: 90 }, () => ({ a: Math.random() * 6.28, r: Math.random() * 600 + 40, s: Math.random() * 0.004 + 0.001, z: Math.random() * 2 + 0.5 }));
-function introLoop(t) {
-  if (!introRunning) return;
-  const w = ic.width = innerWidth * devicePixelRatio, h = ic.height = innerHeight * devicePixelRatio;
-  ix.clearRect(0, 0, w, h);
-  const cx = w / 2, cy = h * 0.42, k = devicePixelRatio;
-  for (let i = 0; i < 48; i++) {               // pulsing sound-wave ring
-    const ang = (i / 48) * Math.PI * 2, amp = 30 + Math.sin(t / 300 + i * 0.7) * 20 + Math.sin(t / 170 + i) * 10;
-    const r1 = 120 * k, r2 = (120 + amp) * k;
-    ix.strokeStyle = `hsla(${(350 + i * 2) % 360},90%,62%,.35)`; ix.lineWidth = 3 * k;
-    ix.beginPath(); ix.moveTo(cx + Math.cos(ang) * r1, cy + Math.sin(ang) * r1); ix.lineTo(cx + Math.cos(ang) * r2, cy + Math.sin(ang) * r2); ix.stroke();
+let introRunning = true, introT0 = null;
+const R = Math.random;
+const dots = Array.from({ length: 90 }, () => ({ a: R() * 6.28, r: R() * 600 + 40, s: R() * 0.004 + 0.001, z: R() * 2 + 0.5 }));
+const parts = Array.from({ length: 260 }, () => { const a = R() * 6.28, d = 0.6 + R() * 0.8; return { a, d, s: 0.6 + R() * 0.8, h: R() * 50 - 10, z: 1 + R() * 2.5 }; });
+const hue = x => `${(350 + x) % 360}`;
+const INTRO_DRAW = {
+  rings(t, w, h, k, cx, cy) {
+    for (let i = 0; i < 48; i++) {
+      const ang = (i / 48) * Math.PI * 2, amp = 30 + Math.sin(t / 300 + i * 0.7) * 20 + Math.sin(t / 170 + i) * 10;
+      const r1 = 120 * k, r2 = (120 + amp) * k;
+      ix.strokeStyle = `hsla(${hue(i * 1.2)},90%,62%,.35)`; ix.lineWidth = 3 * k;
+      ix.beginPath(); ix.moveTo(cx + Math.cos(ang) * r1, cy + Math.sin(ang) * r1); ix.lineTo(cx + Math.cos(ang) * r2, cy + Math.sin(ang) * r2); ix.stroke();
+    }
+    dots.forEach(d => {
+      d.a += d.s; const x = cx + Math.cos(d.a) * d.r * k, y = cy + Math.sin(d.a) * d.r * 0.6 * k;
+      ix.fillStyle = `hsla(${10 + d.r / 14},95%,65%,.7)`; ix.beginPath(); ix.arc(x, y, d.z * k, 0, 7); ix.fill();
+    });
+  },
+  equalizer(t, w, h, k) {          // a wall of EQ bars rises from the floor and dances
+    const n = Math.max(24, Math.floor(w / (22 * k))), bw = w / n, grow = Math.min(1, t / 1400);
+    for (let i = 0; i < n; i++) {
+      const x = i / n, v = 0.25 + 0.35 * Math.abs(Math.sin(t / 260 + i * 0.45)) * (0.6 + 0.4 * Math.sin(t / 900 + x * 6)) + 0.25 * Math.exp(-((x - 0.5) ** 2) / 0.02);
+      const bh = v * h * 0.55 * grow, y = h - bh;
+      const g = ix.createLinearGradient(0, h, 0, y); g.addColorStop(0, "#f43f5e"); g.addColorStop(1, "#fbbf24");
+      ix.globalAlpha = 0.55; ix.fillStyle = g;
+      for (let yy = h; yy > y; yy -= 12 * k) ix.fillRect(i * bw + 2 * k, yy - 9 * k, bw - 4 * k, 9 * k); // LED segments
+      ix.globalAlpha = 1;
+    }
+  },
+  wave(t, w, h, k, cx, cy) {        // glowing sound waves sweep across the screen
+    const sweep = Math.min(1, t / 1500);
+    for (let L = 0; L < 4; L++) {
+      ix.beginPath(); ix.lineWidth = (3 - L * 0.5) * k; ix.strokeStyle = `hsla(${hue(L * 18)},95%,${60 + L * 5}%,${0.9 - L * 0.18})`;
+      ix.shadowBlur = 18 * k; ix.shadowColor = "#f43f5e";
+      for (let x = 0; x <= w * sweep; x += 4 * k) {
+        const p = x / w, env = Math.sin(p * Math.PI);
+        const y = cy + Math.sin(p * (14 + L * 3) + t / (220 + L * 60)) * h * 0.13 * env * (1 - L * 0.15) + Math.sin(p * 40 + t / 90) * 6 * k * env;
+        x ? ix.lineTo(x, y) : ix.moveTo(x, y);
+      }
+      ix.stroke();
+    }
+    ix.shadowBlur = 0;
+  },
+  glitch(t, w, h, k) {              // scanlines, RGB noise blocks
+    ix.fillStyle = "rgba(255,255,255,.03)";
+    for (let y = (t / 20) % (4 * k); y < h; y += 4 * k) ix.fillRect(0, y, w, k);
+    const burst = (Math.floor(t / 90) % 9 === 0) || t < 1400;
+    if (burst) for (let i = 0; i < 14; i++) {
+      ix.fillStyle = ["#f43f5e55", "#fbbf2455", "#22d3ee44"][i % 3];
+      ix.fillRect(R() * w, R() * h, R() * w * 0.4, R() * 6 * k + 2 * k);
+    }
+  },
+  burst(t, w, h, k, cx, cy) {       // particles rush in, then explode outward
+    const M = Math.max(w, h) * 0.7, impact = 1100;
+    parts.forEach(p => {
+      let r;
+      if (t < impact) r = M * p.d * (1 - Math.pow(t / impact, 2 * p.s));
+      else r = Math.min(M * 1.3, (t - impact) * 0.35 * k * p.s * p.d + 80 * k);
+      const x = cx + Math.cos(p.a + t / 4000) * r, y = cy + Math.sin(p.a + t / 4000) * r;
+      ix.fillStyle = `hsla(${hue(p.h + 20)},95%,65%,${t < impact ? 0.9 : Math.max(0.15, 1 - (t - impact) / 3000)})`;
+      ix.beginPath(); ix.arc(x, y, p.z * k, 0, 7); ix.fill();
+    });
+    if (t > impact && t < impact + 700) {   // shockwave
+      const q = (t - impact) / 700; ix.strokeStyle = `rgba(251,191,36,${1 - q})`; ix.lineWidth = 6 * k * (1 - q);
+      ix.beginPath(); ix.arc(cx, cy, q * M * 0.8, 0, 7); ix.stroke();
+    }
   }
-  dots.forEach(d => {
-    d.a += d.s; const x = cx + Math.cos(d.a) * d.r * k, y = cy + Math.sin(d.a) * d.r * 0.6 * k;
-    ix.fillStyle = `hsla(${10 + d.r / 14},95%,65%,.7)`; ix.beginPath(); ix.arc(x, y, d.z * k, 0, 7); ix.fill();
-  });
+};
+function introLoop(now) {
+  if (!introRunning) return;
+  if (introT0 == null) introT0 = now;
+  const t = now - introT0, k = devicePixelRatio;
+  const w = ic.width = innerWidth * k, h = ic.height = innerHeight * k;
+  ix.clearRect(0, 0, w, h);
+  INTRO_DRAW[introStyle](t, w, h, k, w / 2, h * 0.42);
   requestAnimationFrame(introLoop);
 }
 requestAnimationFrame(introLoop);

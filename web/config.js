@@ -4,5 +4,7 @@ window.APP_CONFIG = {
   tagline: "Feel every beat",
   credit: "Ryan Ocbina Barnal",
   version: "1.0.0",
-  logo: "logo.svg"
+  logo: "logo.svg",
+  // Intro animation: "rings", "equalizer", "wave", "glitch" or "burst"
+  intro: "rings"
 };
