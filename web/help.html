@@ -13,9 +13,9 @@ kbd{background:#1c1c36;border:1px solid #ffffff33;border-radius:5px;padding:1px 
 .muted{color:var(--muted)}footer{text-align:center;color:var(--muted);padding:20px 16px 40px}footer strong{color:var(--text)}
 details{margin:10px 0}summary{cursor:pointer;font-weight:600}
 </style></head><body>
-<header><img src="logo.svg" alt=""><h1>Pulsewave User Manual</h1><p class="muted">Version 1.0 · Created by <strong>Ryan Ocbina Barnal</strong></p></header>
+<header><img src="logo.svg" alt=""><h1>Pulsewave User Manual</h1><p class="muted">Version 1.1 · Created by <strong>Ryan Ocbina Barnal</strong></p></header>
 <main>
-<nav><a href="#start">Getting started</a><a href="#install">Installing</a><a href="#play">Playing music</a><a href="#viz">Visual effects</a><a href="#eq">Equalizer</a><a href="#keys">Shortcuts</a><a href="#faq">FAQ &amp; troubleshooting</a></nav>
+<nav><a href="#start">Getting started</a><a href="#install">Installing</a><a href="#play">Playing music</a><a href="#viz">Visual effects</a><a href="#eq">Equalizer</a><a href="#lyrics">Lyrics</a><a href="#keys">Shortcuts</a><a href="#faq">FAQ &amp; troubleshooting</a></nav>
 
 <section id="start"><h2>1. Getting started</h2>
 <ol><li>Open Pulsewave. The animated intro plays.</li>
@@ -47,13 +47,31 @@ details{margin:10px 0}summary{cursor:pointer;font-weight:600}
 <ul><li><b>Presets:</b> Flat, Bass Boost, Treble Boost, Rock, Pop, Jazz, Classical, Electronic, Hip-Hop, Vocal, Acoustic and Late Night</li><li><b>Custom:</b> drag any slider and the preset changes to Custom</li><li><b>EQ on:</b> switches the equalizer on or off, so you can compare</li><li><b>Bass boost:</b> adds up to +12 dB of deep bass</li><li><b>Balance:</b> shifts the sound left or right</li><li><b>Reset:</b> sets everything back to Flat</li></ul>
 <p class="muted">If the sound distorts, lower the volume or reduce the boosted bands.</p></section>
 
-<section id="keys"><h2>6. Keyboard shortcuts</h2>
-<table><tr><td><kbd>Space</kbd></td><td>Play / pause</td></tr><tr><td><kbd>←</kbd> <kbd>→</kbd></td><td>Previous / next track</td></tr><tr><td><kbd>Shift</kbd> + <kbd>←</kbd> / <kbd>→</kbd></td><td>Skip back / forward 10 seconds</td></tr><tr><td><kbd>↑</kbd> <kbd>↓</kbd></td><td>Volume</td></tr><tr><td><kbd>M</kbd></td><td>Mute</td></tr><tr><td><kbd>S</kbd></td><td>Shuffle</td></tr><tr><td><kbd>R</kbd></td><td>Repeat mode</td></tr><tr><td><kbd>V</kbd></td><td>Next visual effect</td></tr><tr><td><kbd>F</kbd></td><td>Full-screen visuals</td></tr><tr><td><kbd>H</kbd></td><td>Help</td></tr></table></section>
+<section id="lyrics"><h2>6. Lyrics</h2>
+<p>Lyrics scroll over the visual effects, karaoke style. The current line glows. Press <b>🎤 Lyrics</b> or <kbd>L</kbd> to show or hide them.</p>
+<p>Pulsewave looks for lyrics in this order:</p>
+<ol><li><b>Lyrics you saved</b> for that song in the Lyrics tab.</li>
+<li><b>A .lrc file</b> with the same name as the song, for example <code>Artist - Title.mp3</code> + <code>Artist - Title.lrc</code>. Add both files together. You can also add the .lrc file later, or press <b>Load .lrc</b>.</li>
+<li><b>Lyrics stored inside the song file.</b> Many MP3s carry them.</li>
+<li><b>Online search</b> in the free LRCLIB lyrics database. This sends the song's title, artist and length to lrclib.net. Turn it off with <b>Find lyrics online automatically</b>.</li></ol>
+<h3>Synced or not synced</h3>
+<p><b>Synced</b> lyrics (.lrc, with times like <code>[01:23.45]</code>) move exactly with the singer. <b>Plain</b> lyrics have no times, so Pulsewave scrolls them evenly through the song.</p>
+<h3>Lyrics tab</h3>
+<ul><li><b>Paste your own:</b> type or paste lyrics into the box and press <b>Save lyrics</b>. Plain text or LRC both work.</li>
+<li><b>Search online:</b> looks the song up again.</li>
+<li><b>Forget saved:</b> removes your saved copy.</li>
+<li><b>Timing −0.5 s / +0.5 s:</b> nudges the lyrics if they are early or late. Pulsewave remembers this for each song.</li>
+<li><b>Text size:</b> makes the lyrics bigger or smaller.</li></ul>
+<p class="muted">Tip: in full-screen mode (<kbd>F</kbd>) the lyrics get bigger, which is good for karaoke on a TV.</p></section>
 
-<section id="faq"><h2>7. FAQ &amp; troubleshooting</h2>
+<section id="keys"><h2>7. Keyboard shortcuts</h2>
+<table><tr><td><kbd>Space</kbd></td><td>Play / pause</td></tr><tr><td><kbd>←</kbd> <kbd>→</kbd></td><td>Previous / next track</td></tr><tr><td><kbd>Shift</kbd> + <kbd>←</kbd> / <kbd>→</kbd></td><td>Skip back / forward 10 seconds</td></tr><tr><td><kbd>↑</kbd> <kbd>↓</kbd></td><td>Volume</td></tr><tr><td><kbd>M</kbd></td><td>Mute</td></tr><tr><td><kbd>S</kbd></td><td>Shuffle</td></tr><tr><td><kbd>R</kbd></td><td>Repeat mode</td></tr><tr><td><kbd>V</kbd></td><td>Next visual effect</td></tr><tr><td><kbd>F</kbd></td><td>Full-screen visuals</td></tr><tr><td><kbd>L</kbd></td><td>Show / hide lyrics</td></tr><tr><td><kbd>H</kbd></td><td>Help</td></tr></table></section>
+
+<section id="faq"><h2>8. FAQ &amp; troubleshooting</h2>
 <details><summary>No sound</summary><p>Check the volume slider and the mute button, and your device's volume. On iPhone, also check the silent switch. Make sure you pressed <b>Tap to start</b>, because browsers only allow sound after a tap.</p></details>
 <details><summary>A song won't play</summary><p>Your device may not support that format. Convert it to MP3 or M4A.</p></details>
 <details><summary>My playlist is empty after reopening</summary><p>For your privacy, songs are not stored. Add them again each session. Pulsewave does remember your equalizer, volume, theme and effect.</p></details>
+<details><summary>No lyrics appear</summary><p>Check the Lyrics tab. If it says nothing was found, the song may not be in LRCLIB, or its name may not match. Rename the file to <code>Artist - Title</code> and press <b>Search online</b>, or paste the lyrics yourself.</p></details>
 <details><summary>The visuals are slow on my phone</summary><p>Try the <b>Bars</b> or <b>Wave</b> effect. They use the least power.</p></details>
 <details><summary>Windows or macOS warns about the app</summary><p>The installers are not code-signed yet. Follow the steps in <a href="#install">Installing</a>.</p></details>
 </section>

@@ -50,11 +50,13 @@
         <button data-mode="radial">Radial</button>
         <button data-mode="galaxy">Galaxy</button>
         <button data-mode="tunnel">Tunnel</button>
+        <button id="lyricsBtn" class="ly-toggle" title="Show / hide lyrics (L)">🎤 Lyrics</button>
       </div>
+      <div id="lyrics" class="lyrics empty"><div id="lyricsLines" class="ly-lines"></div></div>
       <div class="theme-dots" id="themeDots"></div>
       <div class="empty-hint" id="emptyHint">
         <p>Drop music here or</p>
-        <label class="btn primary">Add music<input type="file" id="fileInput" accept="audio/*" multiple hidden></label>
+        <label class="btn primary">Add music<input type="file" id="fileInput" accept="audio/*,.lrc,.txt" multiple hidden></label>
       </div>
     </section>
 
@@ -88,11 +90,12 @@
       <div class="tabs">
         <button data-tab="playlist" class="active">Playlist</button>
         <button data-tab="eq">Equalizer</button>
+        <button data-tab="lyrics">Lyrics</button>
       </div>
 
       <div class="panel" id="panel-playlist">
         <div class="pl-actions">
-          <label class="btn">+ Add files<input type="file" id="fileInput2" accept="audio/*" multiple hidden></label>
+          <label class="btn">+ Add files<input type="file" id="fileInput2" accept="audio/*,.lrc,.txt" multiple hidden></label>
           <button class="btn" id="clearBtn">Clear</button>
         </div>
         <ol id="playlist"></ol>
@@ -109,6 +112,27 @@
           <label>Bass boost <input type="range" id="bassBoost" min="0" max="12" value="0"></label>
           <label>Balance <input type="range" id="balance" min="-100" max="100" value="0" title="Balance"></label>
         </div>
+      </div>
+
+      <div class="panel hidden" id="panel-lyrics">
+        <p class="ly-status" id="lyStatus">Play a song to see its lyrics.</p>
+        <div class="ly-row">
+          <label class="btn">Load .lrc<input type="file" id="lyFile" accept=".lrc,.txt" hidden></label>
+          <button class="btn" id="lySearch">Search online</button>
+        </div>
+        <textarea id="lyText" rows="8" placeholder="Paste lyrics here. Plain text works. For karaoke timing use LRC lines like:&#10;[00:12.50] First line of the song&#10;[00:16.20] Next line"></textarea>
+        <div class="ly-row">
+          <button class="btn primary" id="lySave">Save lyrics</button>
+          <button class="btn" id="lyForget">Forget saved</button>
+        </div>
+        <div class="ly-row ly-timing">
+          <span>Timing</span>
+          <button class="btn" id="lyLater" title="Lyrics appear later">− 0.5 s</button>
+          <span id="lyOffset">0.0 s</span>
+          <button class="btn" id="lyEarlier" title="Lyrics appear earlier">+ 0.5 s</button>
+        </div>
+        <label class="ly-opt">Text size <input type="range" id="lySize" min="60" max="160" value="100"></label>
+        <label class="switch ly-opt"><input type="checkbox" id="lyOnline" checked> Find lyrics online automatically (LRCLIB)</label>
       </div>
     </section>
   </main>
@@ -127,6 +151,7 @@
       <li><b>Add music:</b> press <em>Add music</em> or drag audio files onto the window.</li>
       <li><b>Visual effects:</b> pick Bars, Wave, Radial, Galaxy or Tunnel. The colored dots change the theme.</li>
       <li><b>Equalizer:</b> open the <em>Equalizer</em> tab, drag the 10 sliders or choose a preset.</li>
+      <li><b>Lyrics:</b> appear over the visuals. They come from a matching <em>.lrc</em> file, the song file itself, or an online search. You can also paste them in the <em>Lyrics</em> tab. Press 🎤 or <kbd>L</kbd> to hide them.</li>
       <li><b>Full-screen visuals:</b> press ⛶ or <kbd>F</kbd>.</li>
     </ul>
     <h3>Keyboard shortcuts</h3>
@@ -139,6 +164,7 @@
       <tr><td><kbd>S</kbd> / <kbd>R</kbd></td><td>Shuffle / repeat</td></tr>
       <tr><td><kbd>V</kbd></td><td>Next visual effect</td></tr>
       <tr><td><kbd>F</kbd></td><td>Full-screen visuals</td></tr>
+      <tr><td><kbd>L</kbd></td><td>Show / hide lyrics</td></tr>
       <tr><td><kbd>H</kbd></td><td>This help</td></tr>
     </table>
     <p><a class="btn primary" href="help.html" target="_blank">Open full manual</a></p>

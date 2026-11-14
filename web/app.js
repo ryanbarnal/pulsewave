@@ -147,12 +147,17 @@ function initAudio() {
 let tracks = [], cur = -1, shuffle = store.get("shuffle", false), repeat = store.get("repeat", "off"); // off | all | one
 const clean = n => n.replace(/\.[^.]+$/, "").replace(/[_]+/g, " ");
 function addFiles(files) {
-  const list = [...files].filter(f => f.type.startsWith("audio/") || /\.(mp3|wav|ogg|oga|m4a|aac|flac|opus|webm)$/i.test(f.name));
+  files = [...files];
+  const base = n => n.replace(/\.[^.]+$/, "").toLowerCase();
+  const lrcs = files.filter(f => /\.(lrc|txt)$/i.test(f.name));
+  const list = files.filter(f => f.type.startsWith("audio/") || /\.(mp3|wav|ogg|oga|m4a|aac|flac|opus|webm)$/i.test(f.name));
   list.forEach(f => {
     const name = clean(f.name); let title = name, artist = "Unknown artist";
     const m = name.split(" - "); if (m.length > 1) { artist = m[0].trim(); title = m.slice(1).join(" - ").trim(); }
-    tracks.push({ url: URL.createObjectURL(f), title, artist });
+    tracks.push({ url: URL.createObjectURL(f), title, artist, file: f, lrcFile: lrcs.find(l => base(l.name) === base(f.name)) });
   });
+  // .lrc files added on their own attach to the song with the same name, or to the current song
+  if (!list.length && lrcs.length) lrcs.forEach(l => { const t = tracks.find(t => base(t.file.name) === base(l.name)) || tracks[cur]; if (t) { t.lrcFile = l; t.lyrics = null; if (t === tracks[cur]) Lyrics.load(t); } });
   renderPlaylist();
   if (cur === -1 && tracks.length) load(0, true);
 }
@@ -176,6 +181,7 @@ function remove(i) {
 function load(i, play) {
   if (!tracks[i]) return;
   cur = i; audio.src = tracks[i].url; setMeta(); renderPlaylist();
+  Lyrics.load(tracks[i]);
   if (play) playNow();
 }
 function setMeta() {
@@ -275,6 +281,124 @@ function applyEq() {
 }
 applyEq();
 
+/* ---------- Lyrics overlay ---------- */
+const Lyrics = (() => {
+  const el = $("#lyrics"), box = $("#lyricsLines"), status = $("#lyStatus"), ta = $("#lyText");
+  let lines = [], synced = false, idx = -2, track = null, offset = 0;
+  let show = store.get("lyShow", true), online = store.get("lyOnline", true), size = store.get("lySize", 100);
+  const key = t => "ly:" + (t.artist + "|" + t.title).toLowerCase();
+
+  function parse(text) {
+    const out = []; let off = 0, any = false;
+    (text || "").replace(/\r/g, "").split("\n").forEach(raw => {
+      const o = raw.match(/^\[offset:\s*([+-]?\d+)\]/i); if (o) { off = +o[1] / 1000; return; }
+      const tags = [...raw.matchAll(/\[(\d{1,3}):(\d{1,2}(?:[.:]\d{1,3})?)\]/g)];
+      const txt = raw.replace(/\[[^\]]*\]/g, "").trim();
+      if (tags.length) { any = true; tags.forEach(m => out.push({ t: +m[1] * 60 + parseFloat(m[2].replace(":", ".")), text: txt })); }
+      else if (txt && !/^\[\w+:.*\]$/.test(raw.trim())) out.push({ t: null, text: txt });
+    });
+    if (any) { const s = out.filter(l => l.t != null).sort((a, b) => a.t - b.t); s.forEach(l => l.t -= off); return { lines: s, synced: true }; }
+    return { lines: out, synced: false };
+  }
+
+  // Read lyrics embedded in an MP3's ID3v2 tag (USLT frame)
+  async function fromId3(file) {
+    if (!file || !/\.mp3$/i.test(file.name)) return null;
+    const head = new Uint8Array(await file.slice(0, 10).arrayBuffer());
+    if (String.fromCharCode(...head.slice(0, 3)) !== "ID3") return null;
+    const ver = head[3], ss = (b, i) => (b[i] << 21) | (b[i + 1] << 14) | (b[i + 2] << 7) | b[i + 3];
+    const size = ss(head, 6), b = new Uint8Array(await file.slice(10, 10 + size).arrayBuffer());
+    const dec = (enc, bytes) => {
+      try {
+        if (enc === 0) return new TextDecoder("latin1").decode(bytes);
+        if (enc === 3) return new TextDecoder("utf-8").decode(bytes);
+        if (enc === 2) return new TextDecoder("utf-16be").decode(bytes);
+        return new TextDecoder(bytes[0] === 0xfe ? "utf-16be" : "utf-16le").decode(bytes.slice(2));
+      } catch { return ""; }
+    };
+    for (let p = 0; p + 10 < b.length;) {
+      const id = String.fromCharCode(...b.slice(p, p + 4)); if (!/^[A-Z0-9]{4}$/.test(id)) break;
+      const fs = ver >= 4 ? ss(b, p + 4) : (b[p + 4] << 24 | b[p + 5] << 16 | b[p + 6] << 8 | b[p + 7]) >>> 0;
+      if (id === "USLT" || id === "TXXX") {
+        // USLT: encoding, language, descriptor, text. TXXX: encoding, descriptor, value (some taggers put lyrics here)
+        const f = b.slice(p + 10, p + 10 + fs), enc = f[0], wide = enc === 1 || enc === 2;
+        let q = id === "USLT" ? 4 : 1; const d0 = q;
+        if (wide) { while (q + 1 < f.length && !(f[q] === 0 && f[q + 1] === 0)) q += 2; q += 2; }
+        else { while (q < f.length && f[q] !== 0) q++; q++; }
+        const desc = dec(enc, f.slice(d0, q)).replace(/\0/g, "");
+        if (id === "TXXX" && !/lyric|uslt/i.test(desc)) { p += 10 + fs; continue; }
+        const txt = dec(enc, f.slice(q)).replace(/\0/g, "").trim(); if (txt) return txt;
+      }
+      p += 10 + fs;
+    }
+    return null;
+  }
+
+  async function fromOnline(t) {
+    const dur = Math.round(audio.duration || 0), qp = new URLSearchParams({ track_name: t.title });
+    if (t.artist !== "Unknown artist") qp.set("artist_name", t.artist);
+    if (dur) qp.set("duration", dur);
+    try {
+      let r = await fetch("https://lrclib.net/api/get?" + qp);
+      if (r.ok) { const j = await r.json(); if (j.syncedLyrics || j.plainLyrics) return j.syncedLyrics || j.plainLyrics; }
+      r = await fetch("https://lrclib.net/api/search?q=" + encodeURIComponent((t.artist !== "Unknown artist" ? t.artist + " " : "") + t.title));
+      if (r.ok) { const j = (await r.json()).find(x => x.syncedLyrics || x.plainLyrics); if (j) return j.syncedLyrics || j.plainLyrics; }
+    } catch {}
+    return null;
+  }
+
+  function set(text, src) {
+    const p = parse(text); lines = p.lines; synced = p.synced; idx = -2;
+    box.innerHTML = ""; lines.forEach(l => { const d = document.createElement("div"); d.className = "ly-line"; d.textContent = l.text || "♪"; box.appendChild(d); });
+    ta.value = text || "";
+    status.textContent = lines.length ? `${src} · ${synced ? "synced" : "not synced (scrolls with the song)"}` : "No lyrics found. Paste some below, or add a .lrc file.";
+    el.classList.toggle("empty", !lines.length);
+    offset = track ? store.get(key(track) + ":off", 0) : 0; $("#lyOffset").textContent = offset.toFixed(1) + " s";
+  }
+
+  async function load(t) {
+    track = t; set("", ""); status.textContent = "Looking for lyrics…";
+    if (!t) return;
+    let text = store.get(key(t), null), src = "Saved";
+    if (!text && t.lrcFile) { text = await t.lrcFile.text(); src = "From .lrc file"; }
+    if (!text) { text = await fromId3(t.file).catch(() => null); src = "From the song file"; }
+    if (!text && online) { text = await fromOnline(t); src = "From LRCLIB"; }
+    if (track !== t) return;           // the song changed while we were searching
+    set(text, src);
+  }
+
+  function tick() {
+    requestAnimationFrame(tick);
+    if (!show || !lines.length || !audio.duration) return;
+    const ct = audio.currentTime + offset;
+    let i;
+    if (synced) { i = -1; for (let j = 0; j < lines.length && lines[j].t <= ct; j++) i = j; }
+    else i = Math.min(lines.length - 1, Math.floor((ct / audio.duration) * lines.length * 1.05));
+    if (i === idx) return; idx = i;
+    [...box.children].forEach((d, j) => { const dist = Math.abs(j - i); d.className = "ly-line" + (j === i ? " cur" : dist === 1 ? " near" : dist > 3 ? " far" : ""); });
+    const c = box.children[Math.max(0, i)];
+    if (c) box.style.transform = `translateY(${-(c.offsetTop + c.offsetHeight / 2)}px)`;
+  }
+  requestAnimationFrame(tick);
+
+  function apply() {
+    el.classList.toggle("hidden", !show); $("#lyricsBtn").classList.toggle("active", show);
+    el.style.setProperty("--ly", size / 100); $("#lySize").value = size; $("#lyOnline").checked = online; idx = -2;
+    store.set("lyShow", show); store.set("lyOnline", online); store.set("lySize", size);
+  }
+  $("#lyricsBtn").onclick = () => { show = !show; apply(); };
+  $("#lyOnline").onchange = e => { online = e.target.checked; apply(); };
+  $("#lySize").oninput = e => { size = +e.target.value; apply(); };
+  $("#lySave").onclick = () => { if (!track) return; store.set(key(track), ta.value); set(ta.value, "Saved"); };
+  $("#lySearch").onclick = async () => { if (!track) return; status.textContent = "Searching LRCLIB…"; const t = await fromOnline(track); t ? set(t, "From LRCLIB") : (status.textContent = "Nothing found online for this song."); };
+  $("#lyForget").onclick = () => { if (!track) return; try { localStorage.removeItem("pw." + key(track)); } catch {} load(track); };
+  $("#lyFile").onchange = async e => { const f = e.target.files[0]; e.target.value = ""; if (f && track) { track.lrcFile = f; set(await f.text(), "From .lrc file"); } };
+  const nudge = d => { offset = Math.round((offset + d) * 10) / 10; $("#lyOffset").textContent = offset.toFixed(1) + " s"; if (track) store.set(key(track) + ":off", offset); idx = -2; };
+  $("#lyEarlier").onclick = () => nudge(0.5); $("#lyLater").onclick = () => nudge(-0.5);
+  apply();
+  return { load, toggle: () => $("#lyricsBtn").click() };
+})();
+
 /* ---------- Visualizer ---------- */
 const THEMES = [
   { name: "Neon", c: ["#7c3aed", "#06b6d4"], h: [265, 190] },
@@ -296,8 +420,8 @@ function setTheme(i) {
   document.documentElement.style.setProperty("--a1", THEMES[i].c[0]);
   document.documentElement.style.setProperty("--a2", THEMES[i].c[1]);
 }
-function setMode(m) { mode = m; store.set("mode", m); $$("#vizModes button").forEach(b => b.classList.toggle("active", b.dataset.mode === m)); }
-$$("#vizModes button").forEach(b => b.onclick = () => setMode(b.dataset.mode));
+function setMode(m) { mode = m; store.set("mode", m); $$("#vizModes [data-mode]").forEach(b => b.classList.toggle("active", b.dataset.mode === m)); }
+$$("#vizModes [data-mode]").forEach(b => b.onclick = () => setMode(b.dataset.mode));
 setTheme(theme); setMode(mode);
 
 const cv = $("#viz"), g = cv.getContext("2d");
@@ -387,7 +511,7 @@ const help = v => $("#helpModal").classList.toggle("hidden", !v);
 $("#helpBtn").onclick = () => help(true); $("#helpClose").onclick = () => help(false);
 $("#helpModal").onclick = e => { if (e.target.id === "helpModal") help(false); };
 addEventListener("keydown", e => {
-  if (!$("#intro").classList.contains("hidden") || e.target.matches("input[type=text],select")) return;
+  if (!$("#intro").classList.contains("hidden") || e.target.matches("input[type=text],select,textarea")) return;
   const k = e.key;
   if (k === " ") { e.preventDefault(); toggle(); }
   else if (k === "ArrowRight") { e.preventDefault(); e.shiftKey ? audio.currentTime += 10 : next(false); }
@@ -399,6 +523,7 @@ addEventListener("keydown", e => {
   else if (/^[rR]$/.test(k)) $("#repeatBtn").click();
   else if (/^[vV]$/.test(k)) setMode(MODES[(MODES.indexOf(mode) + 1) % MODES.length]);
   else if (/^[fF]$/.test(k)) fs();
+  else if (/^[lL]$/.test(k)) Lyrics.toggle();
   else if (/^[hH?]$/.test(k)) help($("#helpModal").classList.contains("hidden"));
   else if (k === "Escape") help(false);
 });
