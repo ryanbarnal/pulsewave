@@ -317,3 +317,30 @@ kbd{background:var(--panel2);border:1px solid #ffffff33;border-radius:5px;paddin
 .sync-auto{font-size:14px}
 @media (max-width:520px){.sync-pair{flex-direction:column;text-align:center}.qr{width:190px}}
 .sync-join input::placeholder{font:14px system-ui,sans-serif;letter-spacing:0;text-transform:none}
+
+/* ===== Letter-by-letter lyrics, fonts, tap-to-time ===== */
+.lyrics{--ly-font:system-ui,-apple-system,'Segoe UI',sans-serif;--ly-scale:1}
+.ly-line{font-family:var(--ly-font)}
+.stage.lyrics-view .ly-line{font-size:calc(26px * var(--ly) * var(--ly-scale))}
+@media (max-width:480px){.stage.lyrics-view .ly-line{font-size:calc(20px * var(--ly) * var(--ly-scale))}}
+.lyrics.caps .ly-line{text-transform:uppercase;letter-spacing:.02em}
+.ly-line .c{transition:color .09s linear}
+.ly-line.cur .w.sing{background:none;color:inherit;-webkit-background-clip:border-box;background-clip:border-box}
+.ly-line.cur .w.sung{color:inherit}
+.ly-line.cur .c.on{color:var(--a2)}
+.ly-line.cur .c.part{background:linear-gradient(90deg,var(--a2) var(--cp,0%),#fff var(--cp,0%));-webkit-background-clip:text;background-clip:text;color:transparent}
+#lyFont{flex:1}
+.tt-box{background:var(--panel2);border-radius:12px;padding:12px;margin:12px 0}
+.tt-box p{margin:4px 0 10px;font-size:13px}
+.tt-panel{position:absolute;inset:0;z-index:6;background:var(--bg);display:flex;flex-direction:column;padding:14px;gap:10px}
+.tt-top{display:flex;flex-direction:column;gap:2px;font-size:13px}
+.tt-lines{flex:1;display:flex;flex-direction:column;justify-content:center;text-align:center;gap:10px;overflow:hidden}
+.tt-lines p{margin:0}
+.tt-dim{opacity:.4;font-size:16px}
+.tt-cur{font-size:clamp(20px,3.4vw,30px);font-weight:700;line-height:1.4}
+.tt-cur span{padding:0 2px;border-radius:6px}
+.tt-cur .done{color:var(--a2)}
+.tt-cur .tt-now{background:var(--a1);color:#fff;padding:0 6px}
+.tt-done{font-size:18px}
+.tt-btns{display:flex;gap:8px;justify-content:center;flex-wrap:wrap}
+.tt-tap{min-width:140px;font-size:18px;letter-spacing:.1em}

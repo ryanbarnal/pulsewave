@@ -53,6 +53,17 @@
           <p class="np-trivia" id="npTrivia"></p>
         </div>
         <div class="np-mini" id="npMini"><img id="npMiniArt" src="logo.svg" alt=""><span><b id="npMiniTitle"></b><small id="npMiniSub"></small></span></div>
+        <div class="tt-panel hidden" id="ttPanel">
+          <div class="tt-top"><span id="ttCount"></span><span class="muted">Tap when each <b>highlighted</b> word is sung · Space/Enter = tap · Backspace = undo</span></div>
+          <div id="ttLines" class="tt-lines"></div>
+          <div class="tt-btns">
+            <button class="btn" id="ttBack" title="Back 5 seconds">⏪ 5s</button>
+            <button class="btn" id="ttUndo">↶ Undo</button>
+            <button class="btn primary tt-tap" id="ttTap">TAP</button>
+            <button class="btn" id="ttSave">✓ Save</button>
+            <button class="btn" id="ttCancel">Cancel</button>
+          </div>
+        </div>
         <div class="trivia" id="trivia"><span class="trivia-k">💡 Did you know?</span><p id="triviaText"></p></div>
       </div>
       <div class="viz-modes" id="vizModes">
@@ -154,7 +165,15 @@
           <span id="lyOffset">0.0 s</span>
           <button class="btn" id="lyEarlier" title="Lyrics appear earlier">+ 0.5 s</button>
         </div>
+        <label class="ly-opt">Font <select id="lyFont"></select></label>
         <label class="ly-opt">Text size <input type="range" id="lySize" min="60" max="160" value="100"></label>
+        <label class="switch ly-opt"><input type="checkbox" id="lyCaps"> ALL CAPS</label>
+        <label class="switch ly-opt"><input type="checkbox" id="lyFollow" checked> Follow the singer's voice (letters light up while they sing)</label>
+        <div class="tt-box">
+          <b>⏱ Tap to time</b>
+          <p class="muted">Make the lyrics match the singer exactly: play the song and tap on every word as it is sung.</p>
+          <button class="btn primary" id="ttStartBtn">Start timing this song</button>
+        </div>
         <label class="switch ly-opt"><input type="checkbox" id="lyOnline" checked> Find lyrics online automatically (LRCLIB)</label>
         <label class="switch ly-opt"><input type="checkbox" id="triviaOn" checked> Show album art &amp; trivia (looks up song facts online)</label>
       </div>

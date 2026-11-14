@@ -106,6 +106,19 @@ requestAnimationFrame(introLoop);
 const audio = new Audio();
 audio.preload = "metadata";
 let ctx, analyser, filters = [], bass, pan, master, freq, wave, kNodes = null, karaoke = store.get("karaoke", false);
+// Voice detector: energy in the voice band (250–3500 Hz) that sits in the centre of the stereo mix
+let midAn = null, sideAn = null, mBuf, sBuf, vAvg = -60, voiceOn = false, voiceLevel = 0;
+function detectVoice() {
+  if (!midAn || audio.paused) { voiceOn = false; return; }
+  midAn.getFloatFrequencyData(mBuf); sideAn.getFloatFrequencyData(sBuf);
+  const hz = ctx.sampleRate / midAn.fftSize, a = Math.floor(250 / hz), b = Math.ceil(3500 / hz);
+  let m = 0, s = 0;
+  for (let i = a; i < b; i++) { if (isFinite(mBuf[i])) m += 10 ** (mBuf[i] / 10); if (isFinite(sBuf[i])) s += 10 ** (sBuf[i] / 10); }
+  const centre = Math.max(0, m - s / 1.44), lvl = 10 * Math.log10(centre + 1e-12);
+  if (lvl < -110) { voiceOn = false; return; }
+  vAvg = vAvg * 0.994 + lvl * 0.006;
+  voiceLevel = lvl - vAvg; voiceOn = voiceLevel > -1.5;
+}
 // Karaoke mode: cancel the centre-panned voice (left minus right) and add the low end back so the bass stays
 function setKaraoke(on) {
   karaoke = on; store.set("karaoke", on);
@@ -149,6 +162,10 @@ function initAudio() {
   inv.gain.value = -1; diff.gain.value = 1.2; lowKeep.type = "lowpass"; lowKeep.frequency.value = 150;
   src.connect(dry); src.connect(split); split.connect(diff, 0); split.connect(inv, 1); inv.connect(diff);
   diff.connect(merge, 0, 0); diff.connect(merge, 0, 1); merge.connect(wet); src.connect(lowKeep); lowKeep.connect(wet);
+  const midSum = ctx.createGain(); split.connect(midSum, 0); split.connect(midSum, 1);
+  midAn = ctx.createAnalyser(); sideAn = ctx.createAnalyser(); midAn.fftSize = sideAn.fftSize = 1024; midAn.smoothingTimeConstant = sideAn.smoothingTimeConstant = 0.5;
+  mBuf = new Float32Array(midAn.frequencyBinCount); sBuf = new Float32Array(sideAn.frequencyBinCount);
+  midSum.connect(midAn); diff.connect(sideAn);
   dry.connect(mix); wet.connect(mix); kNodes = { dry, wet }; dry.gain.value = karaoke ? 0 : 1; wet.gain.value = karaoke ? 1 : 0;
   let n = mix; [...filters, bass, pan, master].forEach(f => { n.connect(f); n = f; });
   n.connect(analyser); analyser.connect(ctx.destination);
@@ -853,7 +870,13 @@ const Lyrics = (() => {
     lines.forEach(l => {
       const d = document.createElement("div"); d.className = "ly-line";
       const ws = l.words ? l.words.map(w => w.text) : (l.text || "♪").split(/\s+/).filter(Boolean);
-      l.spans = ws.map((w, k) => { if (k) d.appendChild(document.createTextNode(" ")); const s = document.createElement("span"); s.className = "w"; s.textContent = w; d.appendChild(s); return s; });
+      l.chars = [];
+      l.spans = ws.map((w, k) => {
+        if (k) d.appendChild(document.createTextNode(" "));
+        const s = document.createElement("span"); s.className = "w";
+        l.chars.push([...w].map(ch => { const c = document.createElement("span"); c.className = "c"; c.textContent = ch; s.appendChild(c); return c; }));
+        d.appendChild(s); return s;
+      });
       const total = ws.reduce((a, w) => a + w.length + 1, 0) || 1; let acc = 0;
       l.cum = ws.map(w => { const a = acc / total; acc += w.length + 1; return [a, acc / total]; });
       box.appendChild(d);
@@ -875,6 +898,8 @@ const Lyrics = (() => {
     set(text, src);
   }
 
+  const pv = { line: -1, p: 0, now: 0, ct: 0 };
+  let follow = store.get("lyFollow", true);
   function tick() {
     requestAnimationFrame(tick);
     if (show) NP.frame(lines, synced, audio.currentTime + offset);
@@ -900,13 +925,27 @@ const Lyrics = (() => {
       if (wi < 0) wi = 0;
       else { const st = L.words[wi].t, en = L.words[wi + 1] ? L.words[wi + 1].t : Math.min(nx ? nx.t : Infinity, st + 1.2); wp = clamp((ct - st) / Math.max(0.05, en - st)); }
     } else {
-      const dur = Math.min((nx ? nx.t : audio.duration) - L.t, Math.max(1.2, L.text.length * 0.085));
-      const p = clamp((ct - L.t) / Math.max(0.1, dur));
+      const dur = Math.max(0.8, Math.min((nx ? nx.t : audio.duration) - L.t, Math.max(1.5, L.text.length * 0.11)));
+      const lin = clamp((ct - L.t) / dur), now = performance.now();
+      let p = lin;
+      if (follow && midAn) {
+        // move while the singer is singing, nearly stop while they pause, but never drift far from the line's timing
+        if (pv.line !== i || ct < pv.ct - 0.3) Object.assign(pv, { line: i, p: lin });
+        const dt = audio.paused ? 0 : Math.min(0.1, (now - pv.now) / 1000);
+        pv.p += dt / (dur * 0.75) * (voiceOn ? 1.1 : 0.1);
+        pv.p = Math.min(Math.max(pv.p, lin - 0.2), lin + 0.3, 1);
+        p = pv.p;
+      }
+      pv.now = now; pv.ct = ct;
       wi = L.cum.findIndex(c => p < c[1]);
       if (wi < 0) { wi = L.spans.length - 1; wp = 1; } else wp = clamp((p - L.cum[wi][0]) / (L.cum[wi][1] - L.cum[wi][0]));
     }
     L.spans.forEach((s, k) => { const c = k < wi || (k === wi && wp >= 1) ? "w sung" : k === wi ? "w sing" : "w"; if (s.className !== c) s.className = c; });
-    if (L.spans[wi]) L.spans[wi].style.setProperty("--wp", (wp * 100).toFixed(1) + "%");
+    // letters: lit up to the singer's position, the current letter fills part-way
+    L.chars.forEach((cs, k) => {
+      const pos = k < wi ? cs.length : k > wi ? 0 : wp * cs.length, full = Math.floor(pos);
+      cs.forEach((c, j) => { const cl = j < full ? "c on" : j === full && pos > full ? "c part" : "c"; if (c.className !== cl) c.className = cl; if (cl === "c part") c.style.setProperty("--cp", ((pos - full) * 100).toFixed(0) + "%"); });
+    });
   }
   requestAnimationFrame(tick);
 
@@ -927,6 +966,87 @@ const Lyrics = (() => {
   setKaraoke(karaoke);
   $("#lyOnline").onchange = e => { online = e.target.checked; apply(); };
   $("#lySize").oninput = e => { size = +e.target.value; apply(); };
+  $("#lyFollow").checked = follow; $("#lyFollow").onchange = e => { follow = e.target.checked; store.set("lyFollow", follow); };
+  // Lyrics font
+  const FONTS = { "System": "system-ui,-apple-system,'Segoe UI',sans-serif", "Poppins": "'Poppins',sans-serif", "Montserrat": "'Montserrat',sans-serif",
+    "Bebas Neue": "'Bebas Neue',sans-serif", "Oswald": "'Oswald',sans-serif", "Playfair Display": "'Playfair Display',serif", "Lora": "'Lora',serif",
+    "Pacifico": "'Pacifico',cursive", "Caveat": "'Caveat',cursive", "Permanent Marker": "'Permanent Marker',cursive", "Bungee": "'Bungee',sans-serif",
+    "Comfortaa": "'Comfortaa',sans-serif", "Press Start 2P": "'Press Start 2P',monospace" };
+  const ONE_WEIGHT = ["Bebas Neue", "Pacifico", "Permanent Marker", "Bungee", "Press Start 2P"];
+  const fsel = $("#lyFont");
+  fsel.innerHTML = Object.keys(FONTS).map(f => `<option>${f}</option>`).join("");
+  function setFont(f) {
+    if (!FONTS[f]) f = "System";
+    fsel.value = f; store.set("lyFont", f);
+    if (f !== "System" && !document.getElementById("gf-" + f)) {
+      const l = document.createElement("link"); l.rel = "stylesheet"; l.id = "gf-" + f;
+      l.href = "https://fonts.googleapis.com/css2?family=" + f.replace(/ /g, "+") + (ONE_WEIGHT.includes(f) ? "" : ":wght@500;700;800") + "&display=swap";
+      document.head.appendChild(l);
+    }
+    el.style.setProperty("--ly-font", FONTS[f]);
+    el.style.setProperty("--ly-scale", f === "Press Start 2P" ? ".62" : f === "Bebas Neue" || f === "Oswald" ? "1.15" : "1");
+    idx = -2;
+  }
+  fsel.onchange = () => setFont(fsel.value);
+  setFont(store.get("lyFont", "System"));
+  const caps = $("#lyCaps"); caps.checked = store.get("lyCaps", false);
+  const setCaps = () => { el.classList.toggle("caps", caps.checked); store.set("lyCaps", caps.checked); idx = -2; };
+  caps.onchange = setCaps; setCaps();
+
+  /* --- Tap to time: tap on every word as it is sung to make exact word timing --- */
+  const TT = { on: false, rows: [], li: 0, wi: 0 };
+  const lrcTime = t => { t = Math.max(0, t); const m = Math.floor(t / 60), s = (t % 60).toFixed(2).padStart(5, "0"); return `${String(m).padStart(2, "0")}:${s}`; };
+  function ttRender() {
+    const r = TT.rows[TT.li], box2 = $("#ttLines");
+    if (!r) { box2.innerHTML = "<p class='tt-done'>✓ All lines timed. Press <b>Save</b>.</p>"; return; }
+    const prev = TT.rows[TT.li - 1], next = TT.rows[TT.li + 1];
+    const words = r.words.map((w, k) => `<span class="${k < TT.wi ? "done" : k === TT.wi ? "tt-now" : ""}">${esc(w)}</span>`).join(" ");
+    box2.innerHTML = (prev ? `<p class="tt-dim">${esc(prev.words.join(" "))}</p>` : "") + `<p class="tt-cur">${words}</p>` + (next ? `<p class="tt-dim">${esc(next.words.join(" "))}</p>` : "");
+    $("#ttCount").textContent = `Line ${TT.li + 1} of ${TT.rows.length}`;
+  }
+  function ttStart() {
+    if (!track || !lines.length) { toast("Load lyrics for this song first"); return; }
+    TT.rows = lines.filter(l => l.text && l.text !== "♪").map(l => ({ words: (l.words ? l.words.map(w => w.text) : l.text.split(/\s+/)).filter(Boolean), times: [], t: l.t }));
+    TT.li = 0; TT.wi = 0; TT.on = true;
+    $("#ttPanel").classList.remove("hidden"); if (!show) { show = true; apply(); }
+    const first = TT.rows[0] && TT.rows[0].t != null ? Math.max(0, TT.rows[0].t - 3) : 0;
+    audio.currentTime = first; playNow(); ttRender();
+  }
+  function ttTap() {
+    if (!TT.on) return;
+    const r = TT.rows[TT.li]; if (!r) return;
+    r.times[TT.wi] = audio.currentTime; TT.wi++;
+    if (TT.wi >= r.words.length) { TT.li++; TT.wi = 0; }
+    ttRender();
+  }
+  function ttUndo() {
+    if (TT.wi > 0) TT.wi--; else if (TT.li > 0) { TT.li--; TT.wi = TT.rows[TT.li].words.length - 1; } else return;
+    const t = TT.rows[TT.li].times[TT.wi]; TT.rows[TT.li].times.length = TT.wi;
+    if (t != null) audio.currentTime = Math.max(0, t - 2);
+    ttRender();
+  }
+  function ttStop() { TT.on = false; $("#ttPanel").classList.add("hidden"); }
+  function ttSave() {
+    const out = [];
+    TT.rows.forEach(r => {
+      if (r.times.length) out.push(`[${lrcTime(r.times[0])}] ` + r.words.map((w, k) => r.times[k] != null ? `<${lrcTime(r.times[k])}>${w}` : w).join(" "));
+      else if (r.t != null) out.push(`[${lrcTime(r.t)}] ${r.words.join(" ")}`);
+    });
+    if (!TT.rows.some(r => r.times.length)) { toast("Tap along first. Nothing was timed."); return; }
+    const text = out.join("\n");
+    track.lrc = text; track.mtime = Date.now(); saveSong(track); store.set(key(track), text);
+    offset = 0; store.set(key(track) + ":off", 0);
+    set(text, "Timed by you"); ttStop(); toast("Word timing saved");
+  }
+  $("#ttStartBtn").onclick = ttStart;
+  $("#ttTap").onclick = ttTap; $("#ttUndo").onclick = ttUndo; $("#ttSave").onclick = ttSave; $("#ttCancel").onclick = ttStop;
+  $("#ttBack").onclick = () => { audio.currentTime = Math.max(0, audio.currentTime - 5); };
+  addEventListener("keydown", e => {   // while timing: Space / Enter = tap, Backspace = undo
+    if (!TT.on || e.target.matches("input,textarea,select")) return;
+    if (e.key === " " || e.key === "Enter") { e.preventDefault(); e.stopImmediatePropagation(); ttTap(); }
+    else if (e.key === "Backspace") { e.preventDefault(); e.stopImmediatePropagation(); ttUndo(); }
+    else if (e.key === "Escape") { e.stopImmediatePropagation(); ttStop(); }
+  }, true);
   $("#lySave").onclick = () => { if (!track) return; store.set(key(track), ta.value); track.lrc = ta.value; track.mtime = Date.now(); saveSong(track); set(ta.value, "Saved"); };
   $("#lySearch").onclick = async () => { if (!track) return; status.textContent = "Searching LRCLIB…"; const t = await fromOnline(track); t ? set(t, "From LRCLIB") : (status.textContent = "Nothing found online for this song."); };
   $("#lyForget").onclick = () => { if (!track) return; try { localStorage.removeItem("pw." + key(track)); } catch {} load(track); };
@@ -1195,6 +1315,7 @@ function draw(t) {
   const [h1, h2] = THEMES[theme].h;
   const mini = cv.parentElement.id === "player", m = mini ? (mode === "wave" ? "wave" : "bars") : mode;
   $("#np").style.setProperty("--beat", beat.toFixed(2));
+  detectVoice();
   if (mini) g.clearRect(0, 0, W, H);
   else { const trail = m === "galaxy" || m === "tunnel" ? 0.22 : 0.35; g.fillStyle = `rgba(5,5,13,${trail})`; g.fillRect(0, 0, W, H); }
   // beat glow

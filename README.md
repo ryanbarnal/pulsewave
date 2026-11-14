@@ -7,6 +7,7 @@
 ## Features
 - Animated intro
 - 5 visual effects (Bars, Wave, Radial, Galaxy, Tunnel), 5 color themes and beat-reactive glow
+- Letter-by-letter lyrics that follow the singer's voice, tap-to-time exact word timing, 13 lyric fonts
 - Karaoke mode: turns down the singer's voice, and lyrics fill word by word and pulse with the beat
 - Lyrics screen with album-art backdrop, album art during instrumental breaks, and song trivia (iTunes and Wikipedia)
 - Lyrics (.lrc files, lyrics inside MP3s, LRCLIB online search, or paste your own)
