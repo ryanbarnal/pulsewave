@@ -183,8 +183,22 @@ const DB = (() => {
     del: (n, k) => run(n, "readwrite", s => s.delete(k)).catch(() => {})
   };
 })();
-const saveSong = s => { const { url, artUrl, ...rec } = s; return DB.put("songs", rec); };
-const savePl = p => DB.put("playlists", p);
+// keep = true when applying a change that came from another device (don't re-stamp it)
+const syncChanged = () => { if (window.__pwSync) window.__pwSync.changed(); };
+const saveSong = (s, keep) => { const { url, artUrl, ...rec } = s; if (!keep) syncChanged(); return DB.put("songs", rec); };
+const savePl = (p, keep) => { if (!keep) { p.updated = Date.now(); syncChanged(); } return DB.put("playlists", p); };
+const tomb = k => { const t = store.get("tomb", {}); t[k] = Date.now(); store.set("tomb", t); syncChanged(); };
+function removeSongLocal(s) {
+  songs = songs.filter(x => x !== s);
+  playlists.forEach(p => { const n = p.songIds.length; p.songIds = p.songIds.filter(id => id !== s.id); if (p.songIds.length !== n) savePl(p, true); });
+  for (let i = tracks.length - 1; i >= 0; i--) if (tracks[i] === s) removeFromQueue(i);
+  if (s.url) URL.revokeObjectURL(s.url); if (s.artUrl) URL.revokeObjectURL(s.artUrl);
+  DB.del("songs", s.id);
+}
+function removePlLocal(p) {
+  playlists = playlists.filter(x => x !== p); folders = folders.filter(x => x !== p); DB.del("playlists", p.id);
+  if (view.id === p.id) view = { type: "playlists" };
+}
 const srcUrl = s => s.url || (s.url = URL.createObjectURL(s.file));
 const artUrl = s => s && s.art ? (s.artUrl || (s.artUrl = URL.createObjectURL(s.art))) : "logo.svg";
 
@@ -354,7 +368,7 @@ async function renameFolder(f) { const n = await ask("Rename folder", f.name, "S
 async function deleteFolder(f) {
   if (!await ask("Delete folder?", null, "Delete", `“${f.name}” will be deleted. Its playlists move back to Playlists.`)) return;
   inFolder(f).forEach(p => { delete p.folderId; savePl(p); });
-  folders = folders.filter(x => x !== f); DB.del("playlists", f.id); go({ type: "playlists" });
+  removePlLocal(f); tomb(f.id); go({ type: "playlists" });
 }
 function moveToFolder(p, fid) { if (fid) p.folderId = fid; else delete p.folderId; savePl(p); const f = getFolder(fid); toast(f ? `Moved to “${f.name}”` : "Moved out of folder"); render(); }
 function folderMenu(anchor, p) {
@@ -378,19 +392,15 @@ function addToPlaylist(p, s) {
   p.songIds.push(s.id); savePl(p); toast(`Added to “${p.name}”`); render();
 }
 function movePl(p, a, b) { if (a === b) return; const [x] = p.songIds.splice(a, 1); p.songIds.splice(b, 0, x); savePl(p); render(); }
-function toggleFav(s) { s.fav = !s.fav; saveSong(s); toast(s.fav ? "Added to Favorite Songs" : "Removed from Favorite Songs"); render(); }
+function toggleFav(s) { s.fav = !s.fav; s.mtime = Date.now(); saveSong(s); toast(s.fav ? "Added to Favorite Songs" : "Removed from Favorite Songs"); render(); }
 async function renamePl(p) { const n = await ask("Rename playlist", p.name, "Save"); if (n) { p.name = n; savePl(p); render(); } }
 async function deletePl(p) {
   if (!await ask("Delete playlist?", null, "Delete", `“${p.name}” will be deleted. The songs stay in your library.`)) return;
-  playlists = playlists.filter(x => x !== p); DB.del("playlists", p.id); go({ type: "playlists" });
+  removePlLocal(p); tomb(p.id); go({ type: "playlists" });
 }
 async function deleteSong(s) {
   if (!await ask("Delete from library?", null, "Delete", `“${s.title}” will be removed from this device and from all playlists.`)) return;
-  songs = songs.filter(x => x !== s);
-  playlists.forEach(p => { const n = p.songIds.length; p.songIds = p.songIds.filter(id => id !== s.id); if (p.songIds.length !== n) savePl(p); });
-  for (let i = tracks.length - 1; i >= 0; i--) if (tracks[i] === s) removeFromQueue(i);
-  if (s.url) URL.revokeObjectURL(s.url); if (s.artUrl) URL.revokeObjectURL(s.artUrl);
-  DB.del("songs", s.id); render();
+  removeSongLocal(s); tomb(s.size + ":" + s.fname); render();
 }
 
 /* --- small UI helpers: toast, dialog, pop-up menu --- */
@@ -858,8 +868,7 @@ const Lyrics = (() => {
     NP.load(t);
     track = t; set("", ""); status.textContent = "Looking for lyrics…";
     if (!t) { status.textContent = "Play a song to see its lyrics."; return; }
-    let text = store.get(key(t), null), src = "Saved";
-    if (!text && t.lrc) { text = t.lrc; src = "From .lrc file"; }
+    let text = t.lrc || store.get(key(t), null), src = "Saved";
     if (!text) { text = await fromId3(t.file).catch(() => null); src = "From the song file"; }
     if (!text && online) { text = await fromOnline(t); src = "From LRCLIB"; }
     if (track !== t) return;           // the song changed while we were searching
@@ -918,15 +927,226 @@ const Lyrics = (() => {
   setKaraoke(karaoke);
   $("#lyOnline").onchange = e => { online = e.target.checked; apply(); };
   $("#lySize").oninput = e => { size = +e.target.value; apply(); };
-  $("#lySave").onclick = () => { if (!track) return; store.set(key(track), ta.value); set(ta.value, "Saved"); };
+  $("#lySave").onclick = () => { if (!track) return; store.set(key(track), ta.value); track.lrc = ta.value; track.mtime = Date.now(); saveSong(track); set(ta.value, "Saved"); };
   $("#lySearch").onclick = async () => { if (!track) return; status.textContent = "Searching LRCLIB…"; const t = await fromOnline(track); t ? set(t, "From LRCLIB") : (status.textContent = "Nothing found online for this song."); };
   $("#lyForget").onclick = () => { if (!track) return; try { localStorage.removeItem("pw." + key(track)); } catch {} load(track); };
-  $("#lyFile").onchange = async e => { const f = e.target.files[0]; e.target.value = ""; if (f && track) { track.lrc = await f.text(); saveSong(track); set(track.lrc, "From .lrc file"); } };
+  $("#lyFile").onchange = async e => { const f = e.target.files[0]; e.target.value = ""; if (f && track) { track.lrc = await f.text(); track.mtime = Date.now(); saveSong(track); set(track.lrc, "From .lrc file"); } };
   const nudge = d => { offset = Math.round((offset + d) * 10) / 10; $("#lyOffset").textContent = offset.toFixed(1) + " s"; if (track) store.set(key(track) + ":off", offset); idx = -2; };
   $("#lyEarlier").onclick = () => nudge(0.5); $("#lyLater").onclick = () => nudge(-0.5);
   apply();
   return { load, toggle: () => $("#lyricsBtn").click() };
 })();
+
+/* ---------- Sync between devices (QR pairing, direct device-to-device with WebRTC) ---------- */
+const Sync = (() => {
+  const SITE = "https://pulsewave.ryanbarnal.com/";
+  const ALPH = "abcdefghjkmnpqrstuvwxyz23456789";
+  const rid = n => Array.from(crypto.getRandomValues(new Uint8Array(n)), b => ALPH[b % ALPH.length]).join("");
+  let devId = store.get("devId", null); if (!devId) { devId = rid(6); store.set("devId", devId); }
+  const ua = navigator.userAgent;
+  const devName = (/iPhone/.test(ua) ? "iPhone" : /iPad/.test(ua) ? "iPad" : /Android/.test(ua) ? "Android phone" : /Windows/.test(ua) ? "Windows PC" : /Mac/.test(ua) ? "Mac" : "Computer") + (/Electron/.test(ua) ? " (app)" : " (browser)");
+  let peer = null, myCode = devId, onReady = [], dialing = false, wasBusy = false, changeT = 0, renderT = 0;
+  const conns = new Map();
+  const keyOf = s => s.size + ":" + s.fname;
+  const tombs = () => store.get("tomb", {});
+  const devices = () => store.get("devices", []);
+  const live = () => [...conns.values()].filter(c => c.open && c.dev);
+  const setState = t => { $("#syncState").textContent = t; };
+  const CHUNK = 64 * 1024;
+  const tx = (conn, obj) => conn.send(JSON.stringify(obj));
+  const drain = conn => new Promise(res => {               // wait while the channel's send buffer is full
+    const dc = conn.dataChannel, check = () => (!dc || dc.bufferedAmount < 4 * 1024 * 1024 || !conn.open) ? res() : setTimeout(check, 15);
+    check();
+  });
+
+  /* --- what this device has --- */
+  const songMeta = s => ({ id: s.id, key: keyOf(s), fname: s.fname, size: s.size, title: s.title, artist: s.artist, album: s.album, duration: s.duration,
+    year: s.year || "", genre: s.genre || "", fav: !!s.fav, added: s.added || 0, lrc: s.lrc || null, mtime: s.mtime || 0 });
+  function manifest() {
+    const byId = new Map(songs.map(s => [s.id, s]));
+    return { type: "manifest", songs: songs.map(songMeta), tomb: tombs(),
+      pls: [...folders, ...playlists].map(p => ({ id: p.id, name: p.name, folder: !!p.folder, folderId: p.folderId || null, created: p.created || 0,
+        updated: p.updated || p.created || 0, songKeys: p.folder ? [] : p.songIds.map(id => byId.get(id)).filter(Boolean).map(keyOf) })) };
+  }
+
+  /* --- merge what the other device has --- */
+  function applyManifest(conn, m) {
+    const T = tombs(); let changed = false;
+    for (const [k, t] of Object.entries(m.tomb || {})) {          // deletions made on the other device
+      if ((T[k] || 0) < t) T[k] = t;
+      const s = songs.find(x => keyOf(x) === k);
+      if (s && Math.max(s.added || 0, s.mtime || 0) < t) { removeSongLocal(s); changed = true; }
+      const p = playlists.find(x => x.id === k) || folders.find(x => x.id === k);
+      if (p && (p.updated || p.created || 0) < t) { removePlLocal(p); changed = true; }
+    }
+    store.set("tomb", T);
+    const byKey = new Map(songs.map(s => [keyOf(s), s])), remoteId = {}, want = [];
+    for (const r of m.songs || []) {
+      remoteId[r.key] = r.id;
+      if ((T[r.key] || 0) >= Math.max(r.added || 0, r.mtime || 0)) continue;
+      const s = byKey.get(r.key);
+      if (!s) { if (!conn.asked.has(r.key)) { conn.asked.add(r.key); want.push(r.key); } continue; }
+      if ((r.mtime || 0) > (s.mtime || 0)) { s.fav = r.fav; s.lrc = r.lrc; s.mtime = r.mtime; saveSong(s, true); changed = true; }
+    }
+    for (const r of m.pls || []) {                                  // playlists and folders: newest edit wins
+      if ((T[r.id] || 0) >= r.updated) continue;
+      const arr = r.folder ? folders : playlists;
+      let p = arr.find(x => x.id === r.id);
+      if (p && (p.updated || p.created || 0) >= r.updated) continue;
+      if (!p) { p = { id: r.id }; arr.push(p); }
+      Object.assign(p, { name: r.name, created: r.created, updated: r.updated });
+      if (r.folder) p.folder = true;
+      else p.songIds = r.songKeys.map(k => byKey.has(k) ? byKey.get(k).id : remoteId[k]).filter(Boolean);
+      if (r.folderId) p.folderId = r.folderId; else delete p.folderId;
+      savePl(p, true); changed = true;
+    }
+    if (changed) render();
+    if (want.length) { conn.wantTotal += want.length; tx(conn, { type: "want", keys: want }); }
+    progress();
+  }
+  function receiveChunk(conn, buf) {
+    const inc = conn.inc; if (!inc) return;
+    inc.parts.push(buf); inc.got += buf.byteLength;
+    if (inc.got < inc.artSize + inc.fileSize) return;
+    conn.inc = null;
+    const all = new Blob(inc.parts);
+    inc.msg.art = inc.artSize ? all.slice(0, inc.artSize, inc.msg.artType || "image/jpeg") : null;
+    inc.msg.file = all.slice(inc.artSize);
+    receiveSong(conn, inc.msg).catch(() => {});
+  }
+  async function receiveSong(conn, msg) {
+    const r = msg.meta;
+    if (!songs.some(x => keyOf(x) === r.key)) {
+      const s = { id: songs.some(x => x.id === r.id) ? uid() : r.id, fname: r.fname, size: r.size, title: r.title, artist: r.artist, album: r.album,
+        duration: r.duration, year: r.year, genre: r.genre, fav: r.fav, added: r.added, lrc: r.lrc, mtime: r.mtime,
+        file: new File([msg.file], r.fname, { type: msg.fileType || "" }), art: msg.art || null };
+      songs.push(s); await saveSong(s, true);
+    }
+    conn.got++; tx(conn, { type: "got" }); progress();
+    clearTimeout(renderT); renderT = setTimeout(render, 400);
+  }
+  async function pump(conn) {                                       // send requested songs one at a time
+    if (conn.sending || !conn.out.length || !conn.open) return;
+    const k = conn.out.shift(), s = songs.find(x => keyOf(x) === k);
+    if (!s) { conn.sent++; progress(); return pump(conn); }
+    conn.sending = true;
+    try {
+      const art = s.art || new Blob([]), file = s.file;
+      tx(conn, { type: "song", meta: songMeta(s), fileType: file.type, artType: s.art ? s.art.type : null, artSize: art.size, fileSize: file.size });
+      for (const part of [art, file])
+        for (let o = 0; o < part.size; o += CHUNK) { await drain(conn); if (!conn.open) throw 0; conn.send(await part.slice(o, o + CHUNK).arrayBuffer()); }
+    } catch { conn.sending = false; conn.sent++; progress(); pump(conn); }
+  }
+
+  /* --- connections --- */
+  function setup(conn) {
+    Object.assign(conn, { asked: new Set(), out: [], sending: false, wantTotal: 0, got: 0, sendTotal: 0, sent: 0, dev: null });
+    conns.set(conn.connectionId, conn);
+    conn.on("open", () => { dialing = false; tx(conn, { type: "hello", id: myCode, name: devName }); tx(conn, manifest()); });
+    conn.on("data", d => {
+      if (typeof d === "string") { let m; try { m = JSON.parse(d); } catch { return; } handle(conn, m).catch(() => {}); }
+      else if (d instanceof ArrayBuffer) receiveChunk(conn, d);
+      else if (d && d.buffer instanceof ArrayBuffer) receiveChunk(conn, d.buffer.slice(d.byteOffset, d.byteOffset + d.byteLength));
+    });
+    conn.on("close", () => { conns.delete(conn.connectionId); renderDevices(); progress(); if (!live().length) setState("Ready. Waiting for your other device…"); });
+    conn.on("error", () => {});
+  }
+  async function handle(conn, m) {
+    if (!m || !m.type) return;
+    if (m.type === "hello") {
+      conn.dev = m.id; conn.devName = m.name;
+      for (const c of conns.values()) if (c !== conn && c.dev === m.id && c.open) {   // both sides dialled: keep one link
+        const drop = c.connectionId < conn.connectionId ? conn : c; drop.close(); if (drop === conn) return;
+      }
+      const list = devices().filter(d => d.id !== m.id); list.unshift({ id: m.id, name: m.name, last: Date.now() }); store.set("devices", list);
+      setState(`Connected to ${m.name}`); toast(`⇄ Connected to ${m.name}`); renderDevices();
+    } else if (m.type === "manifest") applyManifest(conn, m);
+    else if (m.type === "want") { (m.keys || []).forEach(k => conn.out.push(k)); conn.sendTotal += (m.keys || []).length; progress(); pump(conn); }
+    else if (m.type === "song") { conn.inc = { msg: m, parts: [], got: 0, artSize: m.artSize || 0, fileSize: m.fileSize || 0 }; if (!m.artSize && !m.fileSize) receiveChunk(conn, new ArrayBuffer(0)); }
+    else if (m.type === "got") { conn.sending = false; conn.sent++; progress(); pump(conn); }
+  }
+  function start() {
+    if (peer || typeof Peer === "undefined") { if (typeof Peer === "undefined") setState("Sync isn't available in this browser."); return; }
+    const ph = new URLSearchParams(location.search).get("peerhost") || store.get("peerHost", "");
+    const opts = { debug: 0 };
+    if (ph) { const [h, p] = ph.split(":"); Object.assign(opts, { host: h, port: +p || 9000, path: "/", secure: false }); }
+    peer = new Peer("pulsewave-" + myCode, opts);
+    setState("Connecting to the sync service…");
+    peer.on("open", () => { setState(live().length ? `Connected to ${live()[0].devName}` : "Ready. Waiting for your other device…"); const q = onReady; onReady = []; q.forEach(f => f()); autoDial(); });
+    peer.on("connection", setup);
+    peer.on("disconnected", () => { setTimeout(() => { if (peer && !peer.destroyed && peer.disconnected) peer.reconnect(); }, 3000); });
+    peer.on("error", e => {
+      if (e.type === "unavailable-id") { peer.destroy(); peer = null; myCode = rid(6); showCode(); return start(); }   // e.g. a second tab
+      if (e.type === "peer-unavailable") { if (dialing) { dialing = false; setState("Couldn't reach that device. Make sure Pulsewave is open on it, then try again."); } return; }
+      if (e.type === "network" || e.type === "server-error" || e.type === "socket-error") setState("Can't reach the sync service. Check your internet connection.");
+    });
+  }
+  function dial(code, manual) {
+    code = String(code || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+    if (!code || code === myCode) { if (manual) setState("That's this device's own code. Enter the code shown on your other device."); return; }
+    if (live().some(c => c.dev === code)) return;
+    const go = () => { if (manual) { dialing = true; setState(`Connecting to ${code.toUpperCase()}…`); } setup(peer.connect("pulsewave-" + code, { reliable: true, serialization: "raw" })); };
+    if (peer && peer.open) go(); else { onReady.push(go); start(); }
+  }
+  function autoDial() { if (store.get("syncAuto", true)) devices().forEach(d => { if (!live().some(c => c.dev === d.id)) dial(d.id); }); }
+  setInterval(() => { if (peer && peer.open && devices().length) autoDial(); }, 45000);
+
+  /* --- UI --- */
+  function progress() {
+    let rt = 0, rg = 0, st = 0, ss = 0;
+    for (const c of conns.values()) { rt += c.wantTotal; rg += c.got; st += c.sendTotal; ss += c.sent; }
+    const busy = rg < rt || ss < st, box = $("#syncProgress");
+    $("#syncBtn").classList.toggle("linked", live().length > 0); $("#syncBtn").classList.toggle("busy", busy);
+    if (rt || st) {
+      box.classList.remove("hidden");
+      $("#syncBar").style.width = Math.round((rg + ss) / Math.max(1, rt + st) * 100) + "%";
+      $("#syncProgText").textContent = busy ? [rt ? `Receiving ${rg} of ${rt} songs` : "", st ? `Sending ${ss} of ${st} songs` : ""].filter(Boolean).join(" · ") : `✓ Up to date (${rg} received, ${ss} sent)`;
+    }
+    if (wasBusy && !busy) toast("⇄ Sync complete");
+    if (!busy && live().length) { const ids = live().map(c => c.dev); store.set("devices", devices().map(d => ids.includes(d.id) ? { ...d, last: Date.now() } : d)); renderDevices(); }
+    wasBusy = busy;
+  }
+  function ago(t) { const s = (Date.now() - t) / 1000; return s < 60 ? "just now" : s < 3600 ? Math.floor(s / 60) + " min ago" : s < 86400 ? Math.floor(s / 3600) + " hr ago" : new Date(t).toLocaleDateString(); }
+  function renderDevices() {
+    const ul = $("#syncDevices"), list = devices();
+    ul.innerHTML = list.length ? list.map(d => { const on = live().some(c => c.dev === d.id);
+      return `<li><span class="dot${on ? " on" : ""}"></span><span class="dn"><b>${esc(d.name)}</b><small>${on ? "Connected" : "Last synced " + ago(d.last)} · code ${esc(d.id.toUpperCase())}</small></span>
+        ${on ? "" : `<button class="btn" data-sync="${esc(d.id)}">Sync now</button>`}<button class="btn" data-forget="${esc(d.id)}" title="Forget this device">✕</button></li>`; }).join("")
+      : `<li class="muted">No devices paired yet.</li>`;
+    $("#syncBtn").classList.toggle("linked", live().length > 0);
+  }
+  function showCode() {
+    $("#syncCode").textContent = myCode.toUpperCase();
+    const base = location.protocol.startsWith("http") ? location.origin + location.pathname : SITE;
+    const url = base + "?pair=" + myCode;
+    try { const qr = qrcode(0, "M"); qr.addData(url); qr.make(); $("#syncQr").innerHTML = qr.createSvgTag({ cellSize: 4, margin: 2, scalable: true }); } catch { $("#syncQr").textContent = ""; }
+    $("#syncQr").title = url;
+  }
+  function open() { start(); showCode(); renderDevices(); progress(); $("#syncModal").classList.remove("hidden"); }
+  $("#syncBtn").onclick = open;
+  $("#syncClose").onclick = () => $("#syncModal").classList.add("hidden");
+  $("#syncModal").onclick = e => { if (e.target.id === "syncModal") $("#syncModal").classList.add("hidden"); };
+  $("#syncJoin").onclick = () => dial($("#syncInput").value, true);
+  $("#syncInput").onkeydown = e => { if (e.key === "Enter") $("#syncJoin").click(); };
+  $("#syncAuto").checked = store.get("syncAuto", true);
+  $("#syncAuto").onchange = e => { store.set("syncAuto", e.target.checked); if (e.target.checked) autoDial(); };
+  $("#syncDevices").onclick = e => {
+    const s = e.target.closest("[data-sync]"), f = e.target.closest("[data-forget]");
+    if (s) dial(s.dataset.sync, true);
+    if (f) { store.set("devices", devices().filter(d => d.id !== f.dataset.forget)); live().filter(c => c.dev === f.dataset.forget).forEach(c => c.close()); renderDevices(); }
+  };
+
+  // Opened from a scanned QR code (…/?pair=CODE)? Connect straight away.
+  const pair = new URLSearchParams(location.search).get("pair");
+  if (pair) { history.replaceState(null, "", location.pathname + location.search.replace(/[?&]pair=[^&]*/, "").replace(/^&/, "?")); open(); dial(pair, true); }
+  else if (devices().length && store.get("syncAuto", true)) start();
+
+  return {
+    changed() { clearTimeout(changeT); changeT = setTimeout(() => { const m = JSON.stringify(manifest()); live().forEach(c => c.send(m)); }, 1500); },
+    open
+  };
+})();
+window.__pwSync = Sync;
 
 /* ---------- Visualizer ---------- */
 const THEMES = [

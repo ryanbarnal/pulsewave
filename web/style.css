@@ -289,3 +289,31 @@ kbd{background:var(--panel2);border:1px solid #ffffff33;border-radius:5px;paddin
 .player #viz{position:absolute;inset:0;width:100%;height:100%;opacity:.38;pointer-events:none;z-index:0;
   -webkit-mask-image:linear-gradient(transparent,#000 55%);mask-image:linear-gradient(transparent,#000 55%)}
 .stage:not(.lyrics-view) .lyrics{display:none}
+
+/* ===== Sync ===== */
+.sync-btn{position:relative}
+.sync-btn.linked::after{content:"";position:absolute;right:2px;top:2px;width:9px;height:9px;border-radius:50%;background:#22c55e;border:2px solid var(--bg)}
+.sync-btn.busy{animation:spinS 1.2s linear infinite}
+@keyframes spinS{to{transform:rotate(360deg)}}
+.sync-box{max-width:560px}
+.sync-box h2{margin-top:0}
+.sync-pair{display:flex;gap:18px;align-items:center;margin:14px 0}
+.qr{width:170px;flex:none;background:#fff;border-radius:12px;padding:6px;line-height:0}
+.qr svg{width:100%;height:auto}
+.sync-code-box p{margin:0 0 10px;font-size:14px}
+.code{font:700 32px/1 ui-monospace,Menlo,Consolas,monospace;letter-spacing:.18em;color:var(--a2);margin-bottom:8px}
+.sync-state{color:var(--muted);font-size:13px!important}
+.sync-join{display:flex;gap:8px;margin:6px 0 12px}
+.sync-join input{flex:1;min-width:0;background:var(--panel2);border:1px solid #ffffff2a;border-radius:10px;color:var(--text);padding:10px 12px;font:600 16px ui-monospace,Menlo,Consolas,monospace;letter-spacing:.12em;text-transform:uppercase}
+.sync-progress{margin:6px 0 12px;font-size:13px;color:var(--muted)}
+.sync-progress .bar{height:6px;background:var(--panel2);border-radius:99px;overflow:hidden;margin-bottom:6px}
+.sync-progress .bar i{display:block;height:100%;width:0;background:linear-gradient(90deg,var(--a1),var(--a2));transition:width .3s}
+.sync-devices{list-style:none;padding:0;margin:0 0 12px}
+.sync-devices li{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid #ffffff10}
+.sync-devices .dn{flex:1;display:flex;flex-direction:column;min-width:0}
+.sync-devices small{color:var(--muted)}
+.sync-devices .btn{padding:6px 12px;font-size:13px}
+.dot{width:10px;height:10px;border-radius:50%;background:#555;flex:none}.dot.on{background:#22c55e;box-shadow:0 0 8px #22c55e}
+.sync-auto{font-size:14px}
+@media (max-width:520px){.sync-pair{flex-direction:column;text-align:center}.qr{width:190px}}
+.sync-join input::placeholder{font:14px system-ui,sans-serif;letter-spacing:0;text-transform:none}

@@ -13,9 +13,9 @@ kbd{background:#1c1c36;border:1px solid #ffffff33;border-radius:5px;padding:1px 
 .muted{color:var(--muted)}footer{text-align:center;color:var(--muted);padding:20px 16px 40px}footer strong{color:var(--text)}
 details{margin:10px 0}summary{cursor:pointer;font-weight:600}
 </style></head><body>
-<header><img src="logo.svg" alt=""><h1>Pulsewave User Manual</h1><p class="muted">Version 1.1 · Created by <strong>Ryan Ocbina Barnal</strong></p></header>
+<header><img src="logo.svg" alt=""><h1>Pulsewave User Manual</h1><p class="muted">Version 1.2 · Created by <strong>Ryan Ocbina Barnal</strong></p></header>
 <main>
-<nav><a href="#start">Getting started</a><a href="#install">Installing</a><a href="#play">Playing music</a><a href="#library">Library &amp; playlists</a><a href="#viz">Visual effects</a><a href="#eq">Equalizer</a><a href="#lyrics">Lyrics</a><a href="#keys">Shortcuts</a><a href="#faq">FAQ &amp; troubleshooting</a></nav>
+<nav><a href="#start">Getting started</a><a href="#install">Installing</a><a href="#play">Playing music</a><a href="#library">Library &amp; playlists</a><a href="#sync">Sync devices</a><a href="#viz">Visual effects</a><a href="#eq">Equalizer</a><a href="#lyrics">Lyrics</a><a href="#keys">Shortcuts</a><a href="#faq">FAQ &amp; troubleshooting</a></nav>
 
 <section id="start"><h2>1. Getting started</h2>
 <ol><li>Open Pulsewave. The animated intro plays.</li>
@@ -65,6 +65,26 @@ details{margin:10px 0}summary{cursor:pointer;font-weight:600}
 <h3>Search</h3><p>Type in the search box at the top of the Library. It searches song titles, artists, albums and playlist names.</p>
 <p class="muted">Note: the web app, the Windows app and the Mac app each keep their own library. Browsers can remove saved data if your device runs very low on space.</p></section>
 
+<section id="sync"><h2>3c. Sync between phone and computer ⇄</h2>
+<p>Keep the same <b>songs, album art, lyrics, playlists, folders and favorites</b> on all your devices. Devices connect directly to each other. Your music isn't uploaded to any cloud and there's no account to make.</p>
+<h3>Pair two devices (once)</h3>
+<ol><li>On your computer (desktop app or website), tap <b>⇄</b> at the top. A QR code and a 6-letter code appear.</li>
+<li>On your phone, <b>point the camera at the QR code</b> and open the link. Pulsewave opens and connects by itself.<br>Or open Pulsewave on the phone, tap <b>⇄</b>, type the code and tap <b>Connect</b>.</li>
+<li>Keep both open while they sync. A bar shows <em>Receiving … / Sending …</em>, then <b>✓ Up to date</b>.</li></ol>
+<h3>After pairing</h3>
+<ul><li>With <b>Sync automatically</b> on, paired devices find each other and sync whenever both have Pulsewave open. A green dot on ⇄ means they're connected.</li>
+<li>While connected, changes appear on the other device within seconds: new songs, playlist edits, favorites and deletions.</li>
+<li>Tap <b>Sync now</b> next to a paired device to connect right away. Tap <b>✕</b> to forget it.</li></ul>
+<h3>How changes are combined</h3>
+<ul><li>Songs on either device are copied to the other.</li>
+<li>If the same playlist was changed on both devices, the most recent change wins.</li>
+<li>Deleting a song or playlist on one device deletes it on the other at the next sync.</li></ul>
+<h3>Good to know</h3>
+<ul><li>The first sync copies whole music files, so it can take a while for a big library. Use Wi-Fi.</li>
+<li>Both devices need internet. A free public service (PeerJS) introduces the devices to each other, and the music then goes directly from one to the other. On some strict office or school networks the direct link may be blocked.</li>
+<li>Phones pause apps in the background. Keep Pulsewave on screen during a big sync.</li>
+<li>Each device stores its own copy of the music, so make sure your phone has enough free space.</li></ul></section>
+
 <section id="viz"><h2>4. Visual effects</h2>
 <p>Pick an effect with the buttons at the top left of the visuals:</p>
 <ul><li><b>Bars:</b> classic spectrum analyzer bars</li><li><b>Wave:</b> glowing oscilloscope waveform</li><li><b>Radial:</b> circular spectrum that spins and pulses</li><li><b>Galaxy:</b> starfield that speeds up with the energy of the music</li><li><b>Tunnel:</b> rotating hexagon tunnel that reacts to the beat</li></ul>
@@ -107,7 +127,8 @@ details{margin:10px 0}summary{cursor:pointer;font-weight:600}
 <section id="faq"><h2>8. FAQ &amp; troubleshooting</h2>
 <details><summary>No sound</summary><p>Check the volume slider and the mute button, and your device's volume. On iPhone, also check the silent switch. Make sure you pressed <b>Tap to start</b>, because browsers only allow sound after a tap.</p></details>
 <details><summary>A song won't play</summary><p>Your device may not support that format. Convert it to MP3 or M4A.</p></details>
-<details><summary>My songs disappeared</summary><p>Songs are saved in the browser or app you added them in. They are not shared between your phone, the website and the desktop app. Private or incognito windows forget everything when closed. Clearing your browser's site data also removes them.</p></details>
+<details><summary>Sync won't connect</summary><p>Make sure Pulsewave is open on both devices and both are online. Check that you typed the code correctly. Close and reopen ⇄ to try again. Some workplace or school networks block direct device connections. Try mobile data or a home network.</p></details>
+<details><summary>My songs disappeared</summary><p>Songs are saved in the browser or app you added them in. Use <a href="#sync">Sync</a> to copy them between your phone, the website and the desktop app. Private or incognito windows forget everything when closed. Clearing your browser's site data also removes them.</p></details>
 <details><summary>No lyrics appear</summary><p>Check the Lyrics tab. If it says nothing was found, the song may not be in LRCLIB, or its name may not match. Rename the file to <code>Artist - Title</code> and press <b>Search online</b>, or paste the lyrics yourself.</p></details>
 <details><summary>The visuals are slow on my phone</summary><p>Try the <b>Bars</b> or <b>Wave</b> effect. They use the least power.</p></details>
 <details><summary>Windows or macOS warns about the app</summary><p>The installers are not code-signed yet. Follow the steps in <a href="#install">Installing</a>.</p></details>

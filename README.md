@@ -13,6 +13,7 @@
 - 10-band equalizer with 12 presets, bass boost and balance
 - Apple Music–style library: playlists, favorites, songs, artists, albums, album art, search, Up Next queue (saved on the device)
 - Shuffle, repeat, drag and drop, media keys and lock-screen controls
+- Sync between phone and computer: pair with a QR code, then songs, playlists, folders and favorites stay the same (direct device-to-device, no account)
 - Installable on phones (PWA), plus Windows (.exe) and macOS (.dmg) installers
 - Built-in help and a full user manual
 
@@ -38,6 +39,10 @@ Bump `version` in `package.json` and `web/config.js`, then push a tag:
 ```bash
 git tag v1.0.1 && git push origin v1.0.1
 ```
+
+## Third-party
+- [PeerJS](https://peerjs.com) (MIT) for device-to-device sync
+- [qrcode-generator](https://github.com/kazuhikoarase/qrcode-generator) (MIT) for pairing QR codes
 
 ## License
 GPL-3.0 · © 2026 Ryan Ocbina Barnal
