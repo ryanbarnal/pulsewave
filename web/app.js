@@ -213,7 +213,7 @@ async function readTags(file) {
       const id = String.fromCharCode(b[p], b[p + 1], b[p + 2], b[p + 3]); if (!/^[A-Z0-9]{4}$/.test(id)) break;
       const fs = ver >= 4 ? ss(b, p + 4) : (b[p + 4] << 24 | b[p + 5] << 16 | b[p + 6] << 8 | b[p + 7]) >>> 0;
       const f = b.subarray(p + 10, p + 10 + fs);
-      if (id === "TIT2" || id === "TPE1" || id === "TALB") out[id] = dec(f[0], f.subarray(1)).replace(/\0/g, "").trim();
+      if (id === "TIT2" || id === "TPE1" || id === "TALB" || id === "TYER" || id === "TDRC" || id === "TCON") out[id] = dec(f[0], f.subarray(1)).replace(/\0/g, "").trim();
       if (id === "APIC" && !out.art) {
         const enc = f[0]; let q = 1; while (q < f.length && f[q] !== 0) q++;
         let mime = new TextDecoder("latin1").decode(f.subarray(1, q)) || "image/jpeg";
@@ -247,7 +247,8 @@ async function addFiles(files, quiet) {
         id: uid(), fname: f.name, size: f.size, file: f, added: Date.now(), fav: false,
         title: tags.TIT2 || (m.length > 1 ? m.slice(1).join(" - ").trim() : name),
         artist: tags.TPE1 || (m.length > 1 ? m[0].trim() : "Unknown artist"),
-        album: tags.TALB || "", art: tags.art || null, duration: await getDuration(f)
+        album: tags.TALB || "", art: tags.art || null, duration: await getDuration(f),
+        year: (tags.TDRC || tags.TYER || "").slice(0, 4), genre: (tags.TCON || "").replace(/^\(\d+\)/, "")
       };
       songs.push(s);
     }
@@ -292,6 +293,7 @@ function playList(list, i = 0, shuf = false) {
 function load(i, play) {
   if (!tracks[i]) return;
   cur = i; audio.src = srcUrl(tracks[i]); setMeta(); render();
+  tracks[i].plays = (tracks[i].plays || 0) + 1; tracks[i].lastPlayed = Date.now(); saveSong(tracks[i]);
   Lyrics.load(tracks[i]);
   if (play) playNow();
 }
@@ -674,6 +676,94 @@ function applyEq() {
 }
 applyEq();
 
+/* ---------- Now Playing screen: album art backdrop, art "flashes" and trivia ---------- */
+const NP = (() => {
+  const stage = $("#stage"), tv = $("#trivia"), cardTxt = $("#npTrivia");
+  let track = null, facts = [], factI = 0, enabled = store.get("trivia", true), token = 0, remoteArt = null;
+  let cardUntil = 0, cardOn = null, tvOn = false, lastFactAt = 0, lastCardFact = 0;
+  const pick = () => facts.length ? facts[(factI++) % facts.length] : "";
+  const norm = s => String(s || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+  const near = (a, b) => { a = norm(a); b = norm(b); return !!a && !!b && (a.includes(b) || b.includes(a)); };
+
+  function paint() {
+    const t = track, a = t && t.art ? artUrl(t) : remoteArt || "logo.svg";
+    $("#npArt").src = a; $("#npMiniArt").src = a;
+    $("#npBg").style.backgroundImage = `url("${a}")`;
+    $("#npTitle").textContent = $("#npMiniTitle").textContent = t ? t.title : C.name;
+    $("#npSub").textContent = $("#npMiniSub").textContent = t ? [t.artist, t.album].filter(Boolean).join(" · ") : "Add music to begin";
+  }
+  function localFacts(t) {
+    const f = [], n = songs.filter(s => s.artist === t.artist).length;
+    if (t.year) f.push(`“${t.title}” is from ${t.year}.`);
+    if (t.genre) f.push(`Genre: ${t.genre}.`);
+    if (t.artist !== "Unknown artist" && n > 1) f.push(`You have ${n} songs by ${t.artist} in your library.`);
+    if (t.plays > 1) f.push(`You've played “${t.title}” ${t.plays} times.`);
+    return f;
+  }
+  async function lookup(t, my) {
+    const local = localFacts(t), known = t.artist !== "Unknown artist";
+    facts = local;
+    if (!enabled) return;
+    const key = "tv:" + norm(t.artist + "|" + t.title);
+    let info = store.get(key, null);
+    if (!info) {
+      info = { facts: [] };
+      try {   // Apple's public iTunes Search API: release date, album, genre and artwork
+        const r = await fetch("https://itunes.apple.com/search?" + new URLSearchParams({ term: (known ? t.artist + " " : "") + t.title, entity: "song", limit: "5" }));
+        const j = r.ok ? await r.json() : null;
+        const it = j && (j.results || []).find(x => near(x.trackName, t.title) && (!known || near(x.artistName, t.artist)));
+        if (it) {
+          if (it.artworkUrl100) info.art = it.artworkUrl100.replace(/100x100bb/, "600x600bb");
+          if (it.releaseDate) info.facts.push(`“${it.trackName}” by ${it.artistName} was released on ${new Date(it.releaseDate).toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" })}.`);
+          if (it.collectionName && it.trackNumber && it.trackCount) info.facts.push(`It's track ${it.trackNumber} of ${it.trackCount} on “${it.collectionName}”.`);
+          if (it.primaryGenreName) info.facts.push(`Apple Music files it under ${it.primaryGenreName}.`);
+        }
+      } catch {}
+      if (known) try {   // Wikipedia summary about the artist
+        const r = await fetch("https://en.wikipedia.org/api/rest_v1/page/summary/" + encodeURIComponent(t.artist.replace(/ /g, "_")));
+        const j = r.ok ? await r.json() : null;
+        if (j && j.type === "standard" && j.extract && /singer|band|musician|rapper|group|songwriter|\bDJ\b|producer|composer|duo|record/i.test((j.description || "") + " " + j.extract))
+          (j.extract.match(/[^.!?]+[.!?]+/g) || []).map(s => s.trim()).filter(s => s.length > 30).slice(0, 4).forEach(s => info.facts.push(s));
+      } catch {}
+      store.set(key, info);
+    }
+    if (my !== token) return;
+    if (info.art && !t.art) { remoteArt = info.art; paint(); }
+    facts = [...info.facts, ...local]; factI = 0;
+  }
+  function load(t) {
+    track = t; remoteArt = null; facts = []; factI = 0; token++;
+    paint(); cardUntil = performance.now() + 4500; lastFactAt = performance.now() - 8000; cardTxt.textContent = "";
+    if (t) lookup(t, token);
+  }
+  // Called every frame while the lyrics view is open
+  function frame(lines, synced, ct) {
+    const now = performance.now();
+    let card = now < cardUntil || !track || !lines.length;
+    if (!card && synced && audio.duration) {   // flash the album art during instrumental breaks
+      let i = -1; for (let j = 0; j < lines.length && lines[j].t <= ct; j++) i = j;
+      const nextT = lines[i + 1] ? lines[i + 1].t : audio.duration;
+      const lineEnd = i >= 0 ? lines[i].t + Math.max(3, lines[i].text.length * 0.12) : -1;
+      if (nextT - ct > 4 && ct > lineEnd + 1) card = true;
+    }
+    if (card !== cardOn) {
+      cardOn = card; stage.classList.toggle("show-card", card);
+      if (card) { cardTxt.textContent = enabled ? pick() : ""; lastCardFact = now; }
+    }
+    if (card && enabled && facts.length && (!cardTxt.textContent || (facts.length > 1 && now - lastCardFact > 9000))) { cardTxt.textContent = pick(); lastCardFact = now; }
+    // while singing, pop a small trivia bubble now and then
+    if (!card && enabled && facts.length && !audio.paused) {
+      if (!tvOn && now - lastFactAt > 20000) { $("#triviaText").textContent = pick(); tv.classList.add("on"); tvOn = true; lastFactAt = now; }
+      else if (tvOn && now - lastFactAt > 8000) { tv.classList.remove("on"); tvOn = false; lastFactAt = now; }
+    } else if (tvOn) { tv.classList.remove("on"); tvOn = false; }
+  }
+  return {
+    load, frame, refresh: paint,
+    enabled: () => enabled,
+    enable(v) { enabled = v; store.set("trivia", v); if (!v) { cardTxt.textContent = ""; tv.classList.remove("on"); tvOn = false; } if (track) lookup(track, ++token); }
+  };
+})();
+
 /* ---------- Lyrics overlay ---------- */
 const Lyrics = (() => {
   const el = $("#lyrics"), box = $("#lyricsLines"), status = $("#lyStatus"), ta = $("#lyText");
@@ -765,6 +855,7 @@ const Lyrics = (() => {
   }
 
   async function load(t) {
+    NP.load(t);
     track = t; set("", ""); status.textContent = "Looking for lyrics…";
     if (!t) { status.textContent = "Play a song to see its lyrics."; return; }
     let text = store.get(key(t), null), src = "Saved";
@@ -777,6 +868,7 @@ const Lyrics = (() => {
 
   function tick() {
     requestAnimationFrame(tick);
+    if (show) NP.frame(lines, synced, audio.currentTime + offset);
     if (!show || !lines.length || !audio.duration) return;
     const ct = audio.currentTime + offset;
     let i;
@@ -810,11 +902,17 @@ const Lyrics = (() => {
   requestAnimationFrame(tick);
 
   function apply() {
-    el.classList.toggle("hidden", !show); $("#lyricsBtn").classList.toggle("active", show);
+    $("#lyricsBtn").classList.toggle("active", show);
+    $("#stage").classList.toggle("lyrics-view", show);
+    // Visual effects move down behind the play controls while reading lyrics
+    const cv = $("#viz"), home = show ? $("#player") : $("#stage");
+    if (cv.parentElement !== home) home.insertBefore(cv, home.firstChild);
+    NP.refresh();
     el.style.setProperty("--ly", size / 100); $("#lySize").value = size; $("#lyOnline").checked = online; idx = -2;
     store.set("lyShow", show); store.set("lyOnline", online); store.set("lySize", size);
   }
   $("#lyricsBtn").onclick = () => { show = !show; apply(); };
+  $("#triviaOn").checked = NP.enabled(); $("#triviaOn").onchange = e => NP.enable(e.target.checked);
   $("#karaokeBtn").onclick = () => { setKaraoke(!karaoke); if (karaoke) { if (!show) { show = true; apply(); } toast("Karaoke mode on: the singer's voice is turned down"); } else toast("Karaoke mode off"); };
   $("#karaokeOn").onchange = e => setKaraoke(e.target.checked);
   setKaraoke(karaoke);
@@ -875,14 +973,16 @@ function draw(t) {
   bassAvg = bassAvg * 0.95 + low * 0.05;
   beat = Math.max(beat * 0.9, low > bassAvg * 1.15 && low > 120 ? 1 : 0);
   const [h1, h2] = THEMES[theme].h;
-  const trail = mode === "galaxy" || mode === "tunnel" ? 0.22 : 0.35;
-  g.fillStyle = `rgba(5,5,13,${trail})`; g.fillRect(0, 0, W, H);
+  const mini = cv.parentElement.id === "player", m = mini ? (mode === "wave" ? "wave" : "bars") : mode;
+  $("#np").style.setProperty("--beat", beat.toFixed(2));
+  if (mini) g.clearRect(0, 0, W, H);
+  else { const trail = m === "galaxy" || m === "tunnel" ? 0.22 : 0.35; g.fillStyle = `rgba(5,5,13,${trail})`; g.fillRect(0, 0, W, H); }
   // beat glow
-  if (beat > 0.05) { const gr = g.createRadialGradient(W / 2, H / 2, 0, W / 2, H / 2, Math.max(W, H) / 1.4); gr.addColorStop(0, `hsla(${h1},90%,55%,${beat * 0.18})`); gr.addColorStop(1, "transparent"); g.fillStyle = gr; g.fillRect(0, 0, W, H); }
+  if (!mini && beat > 0.05) { const gr = g.createRadialGradient(W / 2, H / 2, 0, W / 2, H / 2, Math.max(W, H) / 1.4); gr.addColorStop(0, `hsla(${h1},90%,55%,${beat * 0.18})`); gr.addColorStop(1, "transparent"); g.fillStyle = gr; g.fillRect(0, 0, W, H); }
   const col = (p, a = 1, l = 60) => `hsla(${h1 + (h2 - h1) * p},90%,${l}%,${a})`;
   const cx = W / 2, cy = H / 2;
 
-  if (mode === "bars") {
+  if (m === "bars") {
     const n = 96, bw = W / n;
     for (let i = 0; i < n; i++) {
       const idx = Math.floor(Math.pow(i / n, 1.7) * freq.length * 0.7);
@@ -891,7 +991,7 @@ function draw(t) {
       g.fillStyle = gr; g.fillRect(i * bw + 1, H - bh, bw - 2, bh);
       g.fillStyle = col(i / n, 0.25); g.fillRect(i * bw + 1, H - bh - 6 * dpr, bw - 2, 3 * dpr);
     }
-  } else if (mode === "wave") {
+  } else if (m === "wave") {
     for (let k = 0; k < 3; k++) {
       g.beginPath(); g.lineWidth = (4 - k) * dpr; g.strokeStyle = col(k / 2, 1 - k * 0.3, 65);
       g.shadowBlur = 20 * dpr; g.shadowColor = col(k / 2);
@@ -902,7 +1002,7 @@ function draw(t) {
       g.stroke();
     }
     g.shadowBlur = 0;
-  } else if (mode === "radial") {
+  } else if (m === "radial") {
     const n = 180, R = Math.min(W, H) * (0.22 + beat * 0.03);
     g.save(); g.translate(cx, cy); g.rotate(t / 6000);
     for (let i = 0; i < n; i++) {
@@ -913,7 +1013,7 @@ function draw(t) {
     g.restore();
     g.beginPath(); g.arc(cx, cy, R * 0.85, 0, 7); g.fillStyle = col(0.5, 0.15 + beat * 0.3); g.fill();
     g.strokeStyle = col(1, 0.8); g.lineWidth = 2 * dpr; g.stroke();
-  } else if (mode === "galaxy") {
+  } else if (m === "galaxy") {
     const energy = freq.slice(0, 200).reduce((a, b) => a + b, 0) / 200 / 255;
     stars.forEach((s, i) => {
       s.z -= 0.003 + energy * 0.03 + beat * 0.02;
@@ -921,7 +1021,7 @@ function draw(t) {
       const x = cx + s.x / s.z * W * 0.3, y = cy + s.y / s.z * H * 0.3, r = (1 - s.z) * 3 * dpr * (1 + beat);
       g.fillStyle = col(i % 2, 1 - s.z * 0.6, 70); g.beginPath(); g.arc(x, y, r, 0, 7); g.fill();
     });
-  } else if (mode === "tunnel") {
+  } else if (m === "tunnel") {
     for (let k = 0; k < 14; k++) {
       const p = ((k / 14) + t / 4000) % 1, v = freq[k * 12] / 255;
       const s = Math.pow(p, 2) * Math.max(W, H) * (1 + v * 0.4);

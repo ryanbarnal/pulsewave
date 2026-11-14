@@ -245,3 +245,47 @@ kbd{background:var(--panel2);border:1px solid #ffffff33;border-radius:5px;paddin
 @media (max-width:900px){.panels{min-height:60vh}}
 .cover.folder-cov{font-size:44px}
 .cover.big.folder-cov{font-size:56px}
+
+/* ===== Lyrics view: calm album-art screen, visuals move to the player ===== */
+.stage-btns{position:absolute;top:12px;right:12px;display:flex;gap:6px;z-index:3}
+.stage-btns button{background:#00000066;border:1px solid #ffffff22;border-radius:999px;padding:6px 12px;font-size:13px;backdrop-filter:blur(6px)}
+.stage-btns button.active{background:linear-gradient(135deg,var(--a1),var(--a2));border-color:transparent}
+.theme-dots{top:auto;bottom:12px;right:12px}
+.np{position:absolute;inset:0;display:none;overflow:hidden}
+.stage.lyrics-view .np{display:block}
+.stage.lyrics-view #viz,.stage.lyrics-view .viz-modes,.stage.lyrics-view .theme-dots{display:none}
+.np-bg{position:absolute;inset:-60px;background:#120a10 center/cover no-repeat;filter:blur(42px) saturate(1.2) brightness(.32);transition:background-image .8s}
+.np-mini{position:absolute;left:14px;top:14px;display:flex;align-items:center;gap:10px;max-width:calc(100% - 260px);z-index:2;transition:opacity .5s}
+.np-mini img{width:46px;height:46px;border-radius:8px;object-fit:cover;box-shadow:0 4px 14px #0008}
+.np-mini span{display:flex;flex-direction:column;min-width:0}
+.np-mini b,.np-mini small{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.np-mini small{color:#ffffffa0}
+.np-card{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;text-align:center;padding:20px;
+  opacity:0;transform:scale(.94);transition:opacity .7s,transform .7s;pointer-events:none;z-index:1}
+.np-card img{width:min(240px,25vh,55vw);aspect-ratio:1;object-fit:cover;border-radius:14px;box-shadow:0 20px 60px #000c;
+  transform:scale(calc(1 + var(--beat,0) * .025));transition:transform .12s}
+.np-meta{display:flex;flex-direction:column;gap:2px}
+.np-meta b{font-size:22px}.np-meta span{color:#ffffffb0}
+.np-trivia{max-width:520px;margin:4px 0 0;color:#ffffffd0;font-size:15px;line-height:1.5;min-height:1.5em}
+.stage.show-card .np-card{opacity:1;transform:none}
+.stage.show-card .lyrics,.stage.show-card .np-mini{opacity:0}
+.trivia{position:absolute;left:50%;bottom:14px;transform:translate(-50%,20px);width:min(560px,calc(100% - 28px));background:#000000a0;border:1px solid #ffffff1c;
+  backdrop-filter:blur(10px);border-radius:14px;padding:10px 14px;opacity:0;transition:opacity .6s,transform .6s;z-index:2;pointer-events:none}
+.trivia.on{opacity:1;transform:translate(-50%,0)}
+.stage.show-card .trivia{opacity:0}
+.trivia-k{font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--a2);font-weight:700}
+.trivia p{margin:4px 0 0;font-size:14px;line-height:1.45}
+.lyrics{transition:opacity .6s}
+.stage.lyrics-view .lyrics{inset:70px 0 64px}
+/* calmer, larger lyrics for reading */
+.stage.lyrics-view .ly-line{font-size:calc(26px * var(--ly));padding:calc(8px * var(--ly)) 28px;text-shadow:0 1px 3px #0009}
+.stage.lyrics-view .ly-line.cur{transform:scale(calc(1.06 + var(--beat) * .025));filter:drop-shadow(0 1px 2px #000a)}
+.stage.lyrics-view .ly-line.cur .w.sing{transform:translateY(calc(-1px - var(--beat) * 3px))}
+.stage.lyrics-view:fullscreen .ly-line{font-size:calc(40px * var(--ly))}
+@media (max-width:480px){.stage.lyrics-view .ly-line{font-size:calc(20px * var(--ly))}.np-mini{max-width:calc(100% - 200px)}.np-mini img{width:38px;height:38px}}
+/* the visualizer as a soft strip behind the player controls */
+.player{position:relative;overflow:hidden}
+.player > *:not(#viz){position:relative;z-index:1}
+.player #viz{position:absolute;inset:0;width:100%;height:100%;opacity:.38;pointer-events:none;z-index:0;
+  -webkit-mask-image:linear-gradient(transparent,#000 55%);mask-image:linear-gradient(transparent,#000 55%)}
+.stage:not(.lyrics-view) .lyrics{display:none}

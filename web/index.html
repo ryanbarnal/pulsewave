@@ -42,15 +42,27 @@
   </header>
 
   <main>
-    <section class="stage">
+    <section class="stage" id="stage">
       <canvas id="viz"></canvas>
+      <div class="np" id="np">
+        <div class="np-bg" id="npBg"></div>
+        <div class="np-card" id="npCard">
+          <img id="npArt" src="logo.svg" alt="">
+          <div class="np-meta"><b id="npTitle"></b><span id="npSub"></span></div>
+          <p class="np-trivia" id="npTrivia"></p>
+        </div>
+        <div class="np-mini" id="npMini"><img id="npMiniArt" src="logo.svg" alt=""><span><b id="npMiniTitle"></b><small id="npMiniSub"></small></span></div>
+        <div class="trivia" id="trivia"><span class="trivia-k">💡 Did you know?</span><p id="triviaText"></p></div>
+      </div>
       <div class="viz-modes" id="vizModes">
         <button data-mode="bars" class="active">Bars</button>
         <button data-mode="wave">Wave</button>
         <button data-mode="radial">Radial</button>
         <button data-mode="galaxy">Galaxy</button>
         <button data-mode="tunnel">Tunnel</button>
-        <button id="lyricsBtn" class="ly-toggle" title="Show / hide lyrics (L)">🎤 Lyrics</button>
+      </div>
+      <div class="stage-btns">
+        <button id="lyricsBtn" class="ly-toggle" title="Switch between lyrics and visual effects (L)">🎤 Lyrics</button>
         <button id="karaokeBtn" title="Karaoke mode: turn down the singer's voice (K)">🎙 Karaoke</button>
       </div>
       <div id="lyrics" class="lyrics empty"><div id="lyricsLines" class="ly-lines"></div></div>
@@ -61,7 +73,7 @@
       </div>
     </section>
 
-    <section class="player">
+    <section class="player" id="player">
       <div class="now">
         <div class="art" id="art"><img src="logo.svg" alt=""></div>
         <div class="meta">
@@ -143,6 +155,7 @@
         </div>
         <label class="ly-opt">Text size <input type="range" id="lySize" min="60" max="160" value="100"></label>
         <label class="switch ly-opt"><input type="checkbox" id="lyOnline" checked> Find lyrics online automatically (LRCLIB)</label>
+        <label class="switch ly-opt"><input type="checkbox" id="triviaOn" checked> Show album art &amp; trivia (looks up song facts online)</label>
       </div>
     </section>
   </main>
