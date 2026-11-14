@@ -105,7 +105,14 @@ requestAnimationFrame(introLoop);
 /* ---------- Audio graph ---------- */
 const audio = new Audio();
 audio.preload = "metadata";
-let ctx, analyser, filters = [], bass, pan, master, freq, wave;
+let ctx, analyser, filters = [], bass, pan, master, freq, wave, kNodes = null, karaoke = store.get("karaoke", false);
+// Karaoke mode: cancel the centre-panned voice (left minus right) and add the low end back so the bass stays
+function setKaraoke(on) {
+  karaoke = on; store.set("karaoke", on);
+  if (kNodes) { const t = ctx.currentTime; kNodes.dry.gain.setTargetAtTime(on ? 0 : 1, t, 0.05); kNodes.wet.gain.setTargetAtTime(on ? 1 : 0, t, 0.05); }
+  const b = document.getElementById("karaokeBtn"), c = document.getElementById("karaokeOn");
+  if (b) b.classList.toggle("active", on); if (c) c.checked = on;
+}
 const BANDS = [32, 64, 125, 250, 500, 1000, 2000, 4000, 8000, 16000];
 const PRESETS = {
   "Flat": [0,0,0,0,0,0,0,0,0,0],
@@ -137,64 +144,180 @@ function initAudio() {
   pan = ctx.createStereoPanner ? ctx.createStereoPanner() : ctx.createGain();
   master = ctx.createGain();
   analyser = ctx.createAnalyser(); analyser.fftSize = 2048; analyser.smoothingTimeConstant = 0.8;
-  let n = src; [...filters, bass, pan, master].forEach(f => { n.connect(f); n = f; });
+  const dry = ctx.createGain(), wet = ctx.createGain(), split = ctx.createChannelSplitter(2), inv = ctx.createGain(),
+    diff = ctx.createGain(), merge = ctx.createChannelMerger(2), lowKeep = ctx.createBiquadFilter(), mix = ctx.createGain();
+  inv.gain.value = -1; diff.gain.value = 1.2; lowKeep.type = "lowpass"; lowKeep.frequency.value = 150;
+  src.connect(dry); src.connect(split); split.connect(diff, 0); split.connect(inv, 1); inv.connect(diff);
+  diff.connect(merge, 0, 0); diff.connect(merge, 0, 1); merge.connect(wet); src.connect(lowKeep); lowKeep.connect(wet);
+  dry.connect(mix); wet.connect(mix); kNodes = { dry, wet }; dry.gain.value = karaoke ? 0 : 1; wet.gain.value = karaoke ? 1 : 0;
+  let n = mix; [...filters, bass, pan, master].forEach(f => { n.connect(f); n = f; });
   n.connect(analyser); analyser.connect(ctx.destination);
   freq = new Uint8Array(analyser.frequencyBinCount); wave = new Uint8Array(analyser.fftSize);
   applyEq(); bass.gain.value = +$("#bassBoost").value; setBalance();
 }
 
-/* ---------- Playlist ---------- */
-let tracks = [], cur = -1, shuffle = store.get("shuffle", false), repeat = store.get("repeat", "off"); // off | all | one
+/* ---------- Library, playlists & queue (saved on this device) ---------- */
+let tracks = [], cur = -1, shuffle = store.get("shuffle", false), repeat = store.get("repeat", "off"); // tracks = the play queue ("Up Next")
+let songs = [], playlists = [], folders = [], view = { type: store.get("libView", "playlists") }, query = "", rowCtx = null, libReady = false;
+const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 const clean = n => n.replace(/\.[^.]+$/, "").replace(/[_]+/g, " ");
-function addFiles(files) {
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const fmtLen = s => isFinite(s) && s > 0 ? `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}` : "";
+const mins = s => s >= 3600 ? `${Math.floor(s / 3600)} hr ${Math.round(s % 3600 / 60)} min` : `${Math.max(1, Math.round(s / 60))} min`;
+const plural = (n, w) => `${n} ${w}${n === 1 ? "" : "s"}`;
+
+const DB = (() => {
+  let p = null;
+  const open = () => p || (p = new Promise((res, rej) => {
+    const r = indexedDB.open("pulsewave", 1);
+    r.onupgradeneeded = () => { r.result.createObjectStore("songs", { keyPath: "id" }); r.result.createObjectStore("playlists", { keyPath: "id" }); };
+    r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error);
+  }));
+  const run = (name, mode, fn) => open().then(d => new Promise((res, rej) => {
+    const t = d.transaction(name, mode), req = fn(t.objectStore(name));
+    t.oncomplete = () => res(req && req.result); t.onerror = t.onabort = () => rej(t.error);
+  }));
+  return {
+    all: n => run(n, "readonly", s => s.getAll()).catch(() => []),
+    put: (n, v) => run(n, "readwrite", s => s.put(v)).catch(e => toast("Couldn't save to this device (" + ((e && e.name) || "storage error") + ")")),
+    del: (n, k) => run(n, "readwrite", s => s.delete(k)).catch(() => {})
+  };
+})();
+const saveSong = s => { const { url, artUrl, ...rec } = s; return DB.put("songs", rec); };
+const savePl = p => DB.put("playlists", p);
+const srcUrl = s => s.url || (s.url = URL.createObjectURL(s.file));
+const artUrl = s => s && s.art ? (s.artUrl || (s.artUrl = URL.createObjectURL(s.art))) : "logo.svg";
+
+// Title, artist, album and cover art from an MP3's ID3v2 tag
+async function readTags(file) {
+  const out = {};
+  try {
+    if (!/\.mp3$/i.test(file.name)) return out;
+    const h = new Uint8Array(await file.slice(0, 10).arrayBuffer());
+    if (h[0] !== 73 || h[1] !== 68 || h[2] !== 51) return out;
+    const ver = h[3], ss = (b, i) => (b[i] << 21) | (b[i + 1] << 14) | (b[i + 2] << 7) | b[i + 3];
+    const b = new Uint8Array(await file.slice(10, 10 + ss(h, 6)).arrayBuffer());
+    const dec = (enc, x) => {
+      try {
+        if (enc === 0) return new TextDecoder("latin1").decode(x);
+        if (enc === 3) return new TextDecoder("utf-8").decode(x);
+        if (enc === 2) return new TextDecoder("utf-16be").decode(x);
+        return new TextDecoder(x[0] === 0xfe ? "utf-16be" : "utf-16le").decode(x.subarray(2));
+      } catch { return ""; }
+    };
+    const term = (f, q, enc) => {
+      if (enc === 1 || enc === 2) { while (q + 1 < f.length && !(f[q] === 0 && f[q + 1] === 0)) q += 2; return q + 2; }
+      while (q < f.length && f[q] !== 0) q++; return q + 1;
+    };
+    for (let p = 0; p + 10 < b.length;) {
+      const id = String.fromCharCode(b[p], b[p + 1], b[p + 2], b[p + 3]); if (!/^[A-Z0-9]{4}$/.test(id)) break;
+      const fs = ver >= 4 ? ss(b, p + 4) : (b[p + 4] << 24 | b[p + 5] << 16 | b[p + 6] << 8 | b[p + 7]) >>> 0;
+      const f = b.subarray(p + 10, p + 10 + fs);
+      if (id === "TIT2" || id === "TPE1" || id === "TALB") out[id] = dec(f[0], f.subarray(1)).replace(/\0/g, "").trim();
+      if (id === "APIC" && !out.art) {
+        const enc = f[0]; let q = 1; while (q < f.length && f[q] !== 0) q++;
+        let mime = new TextDecoder("latin1").decode(f.subarray(1, q)) || "image/jpeg";
+        if (!mime.includes("/")) mime = "image/" + mime.toLowerCase();
+        q = term(f, q + 2, enc);
+        out.art = new Blob([f.slice(q)], { type: mime });
+      }
+      p += 10 + fs;
+    }
+  } catch {}
+  return out;
+}
+const getDuration = f => new Promise(res => {
+  const a = new Audio(), u = URL.createObjectURL(f); let done = false;
+  const fin = d => { if (done) return; done = true; URL.revokeObjectURL(u); res(isFinite(d) ? d : 0); };
+  a.preload = "metadata"; a.onloadedmetadata = () => fin(a.duration); a.onerror = () => fin(0); setTimeout(() => fin(0), 6000); a.src = u;
+});
+
+async function addFiles(files, quiet) {
   files = [...files];
   const base = n => n.replace(/\.[^.]+$/, "").toLowerCase();
   const lrcs = files.filter(f => /\.(lrc|txt)$/i.test(f.name));
   const list = files.filter(f => f.type.startsWith("audio/") || /\.(mp3|wav|ogg|oga|m4a|aac|flac|opus|webm)$/i.test(f.name));
-  list.forEach(f => {
-    const name = clean(f.name); let title = name, artist = "Unknown artist";
-    const m = name.split(" - "); if (m.length > 1) { artist = m[0].trim(); title = m.slice(1).join(" - ").trim(); }
-    tracks.push({ url: URL.createObjectURL(f), title, artist, file: f, lrcFile: lrcs.find(l => base(l.name) === base(f.name)) });
-  });
-  // .lrc files added on their own attach to the song with the same name, or to the current song
-  if (!list.length && lrcs.length) lrcs.forEach(l => { const t = tracks.find(t => base(t.file.name) === base(l.name)) || tracks[cur]; if (t) { t.lrcFile = l; t.lyrics = null; if (t === tracks[cur]) Lyrics.load(t); } });
-  renderPlaylist();
-  if (cur === -1 && tracks.length) load(0, true);
+  const added = [];
+  if (list.length) toast(`Adding ${plural(list.length, "song")}…`);
+  for (const f of list) {
+    let s = songs.find(x => x.fname === f.name && x.size === f.size);
+    if (!s) {
+      const tags = await readTags(f), name = clean(f.name), m = name.split(" - ");
+      s = {
+        id: uid(), fname: f.name, size: f.size, file: f, added: Date.now(), fav: false,
+        title: tags.TIT2 || (m.length > 1 ? m.slice(1).join(" - ").trim() : name),
+        artist: tags.TPE1 || (m.length > 1 ? m[0].trim() : "Unknown artist"),
+        album: tags.TALB || "", art: tags.art || null, duration: await getDuration(f)
+      };
+      songs.push(s);
+    }
+    const l = lrcs.find(l => base(l.name) === base(f.name)); if (l) s.lrc = await l.text();
+    await saveSong(s); added.push(s);
+  }
+  // .lrc files added on their own attach to the song with the same name, or to the song playing now
+  for (const l of lrcs) if (!list.some(f => base(f.name) === base(l.name))) {
+    const s = songs.find(x => base(x.fname) === base(l.name)) || tracks[cur];
+    if (s) { s.lrc = await l.text(); await saveSong(s); if (s === tracks[cur]) Lyrics.load(s); toast(`Lyrics added to “${s.title}”`); }
+  }
+  if (added.length && !quiet) {
+    toast(`Added ${plural(added.length, "song")} to your library`);
+    if (cur === -1) playList(added, 0); else render();
+  }
+  return added;
 }
-function renderPlaylist() {
-  const ol = $("#playlist"); ol.innerHTML = "";
-  tracks.forEach((t, i) => {
-    const li = document.createElement("li"); if (i === cur) li.className = "current";
-    li.innerHTML = `<span class="n"></span><button class="rm" title="Remove">✕</button>`;
-    li.querySelector(".n").textContent = `${t.title} — ${t.artist}`;
-    li.onclick = e => { if (e.target.classList.contains("rm")) return remove(i); load(i, true); };
-    ol.appendChild(li);
-  });
-  $("#emptyHint").classList.toggle("hidden", tracks.length > 0);
+// Import a folder from the computer: every song in it goes into a playlist named after the folder
+async function importFolder(files) {
+  files = [...files]; if (!files.length) return;
+  const dirOf = f => { const parts = (f.webkitRelativePath || "").split("/"); return parts.length > 1 ? parts[parts.length - 2] : "Imported"; };
+  const groups = new Map();
+  files.forEach(f => { const d = dirOf(f); if (!groups.has(d)) groups.set(d, []); groups.get(d).push(f); });
+  let made = 0;
+  for (const [name, fs] of groups) {
+    const added = await addFiles(fs, true);
+    if (!added.length) continue;
+    const p = { id: uid(), name, songIds: added.map(s => s.id), created: Date.now(), folderId: view.type === "folder" ? view.id : undefined };
+    playlists.push(p); await savePl(p); made++;
+  }
+  toast(made ? `Imported ${plural(made, "playlist")}` : "No songs found in that folder");
+  render();
 }
-function remove(i) {
-  URL.revokeObjectURL(tracks[i].url); tracks.splice(i, 1);
-  if (i === cur) { audio.pause(); audio.removeAttribute("src"); cur = -1; setMeta(); if (tracks.length) load(Math.min(i, tracks.length - 1), false); }
-  else if (i < cur) cur--;
-  renderPlaylist();
+
+/* --- playback queue --- */
+function playList(list, i = 0, shuf = false) {
+  if (!list.length) return;
+  tracks = list.slice();
+  if (shuf) { shuffle = true; syncModes(); i = Math.floor(Math.random() * tracks.length); }
+  load(i, true);
 }
 function load(i, play) {
   if (!tracks[i]) return;
-  cur = i; audio.src = tracks[i].url; setMeta(); renderPlaylist();
+  cur = i; audio.src = srcUrl(tracks[i]); setMeta(); render();
   Lyrics.load(tracks[i]);
   if (play) playNow();
+}
+function stopAll() { audio.pause(); audio.removeAttribute("src"); cur = -1; tracks = []; setMeta(); Lyrics.load(null); render(); }
+function removeFromQueue(i) {
+  tracks.splice(i, 1);
+  if (i === cur) { if (tracks.length) load(Math.min(i, tracks.length - 1), !audio.paused); else stopAll(); }
+  else if (i < cur) cur--;
+  render();
 }
 function setMeta() {
   const t = tracks[cur];
   $("#trackTitle").textContent = t ? t.title : "No track loaded";
-  $("#trackArtist").textContent = t ? t.artist : "Add songs to begin";
+  $("#trackArtist").textContent = t ? t.artist + (t.album ? " · " + t.album : "") : "Add songs to begin";
+  $("#art img").src = t ? artUrl(t) : "logo.svg";
   document.title = t ? `${t.title} · ${C.name}` : C.name;
   if (t && "mediaSession" in navigator) {
-    navigator.mediaSession.metadata = new MediaMetadata({ title: t.title, artist: t.artist, album: C.name, artwork: [{ src: "icons/icon-512.png", sizes: "512x512", type: "image/png" }] });
+    navigator.mediaSession.metadata = new MediaMetadata({ title: t.title, artist: t.artist, album: t.album || C.name,
+      artwork: [t.art ? { src: artUrl(t) } : { src: "icons/icon-512.png", sizes: "512x512", type: "image/png" }] });
   }
 }
 function playNow() { initAudio(); ctx.resume(); audio.play().catch(() => {}); }
-function toggle() { if (cur === -1) { if (tracks.length) load(0, true); else $("#fileInput").click(); return; } audio.paused ? playNow() : audio.pause(); }
+function toggle() {
+  if (cur === -1) { if (tracks.length) load(0, true); else if (songs.length) playList(songs); else $("#fileInput").click(); return; }
+  audio.paused ? playNow() : audio.pause();
+}
 function next(auto) {
   if (!tracks.length) return;
   if (auto && repeat === "one") { audio.currentTime = 0; return playNow(); }
@@ -205,6 +328,277 @@ function next(auto) {
   load(n, true);
 }
 function prev() { if (audio.currentTime > 3) { audio.currentTime = 0; return; } load(cur <= 0 ? tracks.length - 1 : cur - 1, true); }
+
+/* --- playlists --- */
+const SMART = [
+  { id: "_fav", name: "Favorite Songs", smart: true, icon: "♥", list: () => songs.filter(s => s.fav) },
+  { id: "_recent", name: "Recently Added", smart: true, icon: "🕘", list: () => [...songs].sort((a, b) => b.added - a.added).slice(0, 50) }
+];
+const getPl = id => SMART.find(p => p.id === id) || playlists.find(p => p.id === id);
+const plSongs = p => p.songIds.map(id => songs.find(s => s.id === id)).filter(Boolean);
+const listOf = p => p.smart ? p.list() : plSongs(p);
+const getFolder = id => folders.find(f => f.id === id);
+const inFolder = f => playlists.filter(p => p.folderId === f.id);
+const folderSongs = f => [...new Set(inFolder(f).flatMap(plSongs))];
+const plLabel = p => { const f = p.folderId && getFolder(p.folderId); return f ? `${f.name} › ${p.name}` : p.name; };
+async function newFolder() {
+  const name = await ask("New folder", `My Folder ${folders.length + 1}`, "Create", "Folders group your playlists together.");
+  if (!name) return null;
+  const f = { id: uid(), name, folder: true, created: Date.now() };
+  folders.push(f); await savePl(f); toast(`Created folder “${f.name}”`); render();
+  return f;
+}
+async function renameFolder(f) { const n = await ask("Rename folder", f.name, "Save"); if (n) { f.name = n; savePl(f); render(); } }
+async function deleteFolder(f) {
+  if (!await ask("Delete folder?", null, "Delete", `“${f.name}” will be deleted. Its playlists move back to Playlists.`)) return;
+  inFolder(f).forEach(p => { delete p.folderId; savePl(p); });
+  folders = folders.filter(x => x !== f); DB.del("playlists", f.id); go({ type: "playlists" });
+}
+function moveToFolder(p, fid) { if (fid) p.folderId = fid; else delete p.folderId; savePl(p); const f = getFolder(fid); toast(f ? `Moved to “${f.name}”` : "Moved out of folder"); render(); }
+function folderMenu(anchor, p) {
+  menu(anchor, [
+    { label: "＋ New folder…", fn: () => newFolder().then(f => f && moveToFolder(p, f.id)) },
+    p.folderId && { label: "No folder", fn: () => moveToFolder(p, null) },
+    folders.length && "-",
+    ...folders.map(f => ({ label: (p.folderId === f.id ? "✓ " : "📁 ") + f.name, fn: () => moveToFolder(p, f.id) }))
+  ]);
+}
+async function newPlaylist(withSong, folderId) {
+  const name = await ask("New playlist", `My Playlist ${playlists.length + 1}`, "Create");
+  if (!name) return null;
+  const p = { id: uid(), name, songIds: withSong ? [withSong.id] : [], created: Date.now() };
+  if (folderId) p.folderId = folderId;
+  playlists.push(p); await savePl(p); toast(`Created “${p.name}”`);
+  return p;
+}
+function addToPlaylist(p, s) {
+  if (p.songIds.includes(s.id)) return toast(`Already in “${p.name}”`);
+  p.songIds.push(s.id); savePl(p); toast(`Added to “${p.name}”`); render();
+}
+function movePl(p, a, b) { if (a === b) return; const [x] = p.songIds.splice(a, 1); p.songIds.splice(b, 0, x); savePl(p); render(); }
+function toggleFav(s) { s.fav = !s.fav; saveSong(s); toast(s.fav ? "Added to Favorite Songs" : "Removed from Favorite Songs"); render(); }
+async function renamePl(p) { const n = await ask("Rename playlist", p.name, "Save"); if (n) { p.name = n; savePl(p); render(); } }
+async function deletePl(p) {
+  if (!await ask("Delete playlist?", null, "Delete", `“${p.name}” will be deleted. The songs stay in your library.`)) return;
+  playlists = playlists.filter(x => x !== p); DB.del("playlists", p.id); go({ type: "playlists" });
+}
+async function deleteSong(s) {
+  if (!await ask("Delete from library?", null, "Delete", `“${s.title}” will be removed from this device and from all playlists.`)) return;
+  songs = songs.filter(x => x !== s);
+  playlists.forEach(p => { const n = p.songIds.length; p.songIds = p.songIds.filter(id => id !== s.id); if (p.songIds.length !== n) savePl(p); });
+  for (let i = tracks.length - 1; i >= 0; i--) if (tracks[i] === s) removeFromQueue(i);
+  if (s.url) URL.revokeObjectURL(s.url); if (s.artUrl) URL.revokeObjectURL(s.artUrl);
+  DB.del("songs", s.id); render();
+}
+
+/* --- small UI helpers: toast, dialog, pop-up menu --- */
+let toastT;
+function toast(msg) { const t = $("#toast"); t.textContent = msg; t.classList.remove("hidden"); clearTimeout(toastT); toastT = setTimeout(() => t.classList.add("hidden"), 2200); }
+function ask(title, value, okLabel = "OK", text = "") {
+  return new Promise(res => {
+    const m = $("#askModal"), inp = $("#askInput"), ok = $("#askOk"), no = $("#askCancel");
+    $("#askTitle").textContent = title; $("#askText").textContent = text; ok.textContent = okLabel;
+    ok.classList.toggle("danger", okLabel === "Delete");
+    inp.classList.toggle("hidden", value === null); inp.value = value ?? "";
+    m.classList.remove("hidden"); if (value !== null) setTimeout(() => { inp.focus(); inp.select(); }, 30);
+    const done = v => { m.classList.add("hidden"); ok.onclick = no.onclick = inp.onkeydown = null; res(v); };
+    ok.onclick = () => done(value === null ? true : (inp.value.trim() || null));
+    no.onclick = () => done(value === null ? false : null);
+    inp.onkeydown = e => { if (e.key === "Enter") ok.click(); if (e.key === "Escape") no.click(); };
+  });
+}
+function closeMenu() { const m = $("#ctxMenu"); if (m) m.remove(); }
+function menu(anchor, items) {
+  closeMenu();
+  const m = document.createElement("div"); m.className = "menu"; m.id = "ctxMenu";
+  items.filter(Boolean).forEach(it => {
+    if (it === "-") return m.appendChild(document.createElement("hr"));
+    const b = document.createElement("button"); b.textContent = it.label; if (it.danger) b.className = "danger";
+    b.onclick = e => { e.stopPropagation(); closeMenu(); it.fn(); };
+    m.appendChild(b);
+  });
+  document.body.appendChild(m);
+  const r = anchor.getBoundingClientRect(), mw = m.offsetWidth, mh = m.offsetHeight;
+  m.style.left = Math.max(8, Math.min(innerWidth - mw - 8, r.right - mw)) + "px";
+  m.style.top = (r.bottom + mh + 8 > innerHeight ? Math.max(8, r.top - mh - 4) : r.bottom + 4) + "px";
+  setTimeout(() => addEventListener("click", closeMenu, { once: true }), 0);
+}
+function songMenu(btn, s, c) {
+  const items = [
+    { label: "▶  Play next", fn: () => { if (cur === -1) return playList([s]); tracks.splice(cur + 1, 0, s); toast("Playing next"); render(); } },
+    { label: "≡  Add to queue", fn: () => { if (cur === -1) return playList([s]); tracks.push(s); toast("Added to queue"); render(); } },
+    { label: "＋ Add to playlist…", fn: () => menu(btn, [{ label: "＋ New playlist…", fn: () => newPlaylist(s).then(render) }, playlists.length && "-",
+        ...playlists.map(p => ({ label: (p.songIds.includes(s.id) ? "✓ " : "") + plLabel(p), fn: () => addToPlaylist(p, s) }))]) },
+    { label: s.fav ? "♡  Remove from Favorites" : "♥  Favorite", fn: () => toggleFav(s) },
+    s.artist !== "Unknown artist" && { label: "👤 Go to artist", fn: () => go({ type: "artist", name: s.artist }) },
+    s.album && { label: "💿 Go to album", fn: () => go({ type: "album", key: albumKey(s) }) }
+  ];
+  if (c.pl && !c.pl.smart) items.push("-",
+    c.i > 0 && { label: "↑  Move up", fn: () => movePl(c.pl, c.i, c.i - 1) },
+    c.i < c.pl.songIds.length - 1 && { label: "↓  Move down", fn: () => movePl(c.pl, c.i, c.i + 1) },
+    { label: "Remove from this playlist", fn: () => { c.pl.songIds.splice(c.i, 1); savePl(c.pl); render(); } });
+  if (c.queue) items.push("-", { label: "Remove from Up Next", fn: () => removeFromQueue(c.i) });
+  items.push("-", { label: "Delete from library", danger: true, fn: () => deleteSong(s) });
+  menu(btn, items);
+}
+
+/* --- library views --- */
+const V = $("#libView"), LP = $("#panel-library");
+const albumKey = s => (s.album || "Unknown album") + "\u0000" + s.artist;
+const hueOf = str => [...String(str)].reduce((a, c) => (a * 31 + c.charCodeAt(0)) % 360, 7);
+function cover(list, p, big) {
+  const arts = [...new Set(list.filter(s => s.art).map(artUrl))];
+  const cls = "cover" + (big ? " big" : "");
+  if (arts.length >= 4) return `<div class="${cls} mosaic">${arts.slice(0, 4).map(u => `<img src="${u}" alt="">`).join("")}</div>`;
+  if (arts.length) return `<div class="${cls}"><img src="${arts[0]}" alt=""></div>`;
+  const h = hueOf(p.id || p.name);
+  return `<div class="${cls} blank" style="background:linear-gradient(135deg,hsl(${h},70%,45%),hsl(${(h + 50) % 360},80%,30%))">${p.icon || "♪"}</div>`;
+}
+const card = (p, act, extra = "") => { const l = listOf(p); return `<button class="card" data-act="${act}" data-id="${esc(p.id)}">${cover(l, p)}<div class="cn">${esc(p.name)}</div><div class="cs">${extra || plural(l.length, "song")}</div></button>`; };
+const head = (title, list, extra = "") => `<div class="pl-btns-row"><span class="muted">${plural(list.length, "song")}${list.length ? ", " + mins(list.reduce((a, s) => a + (s.duration || 0), 0)) : ""}</span>
+  ${list.length ? `<button class="btn primary" data-act="play-all">▶ Play</button><button class="btn" data-act="shuffle-all">🔀 Shuffle</button>` : ""}${extra}</div>`;
+function songsHtml(list, c = {}) {
+  rowCtx = { list, ...c };
+  if (!list.length) return "";
+  const now = tracks[cur], drag = c.pl && !c.pl.smart;
+  return `<ol class="songs">${list.map((s, i) => {
+    const playing = c.queue ? i === cur : now === s;
+    const picked = c.pick && c.pick.songIds.includes(s.id);
+    return `<li class="song${playing ? " current" : ""}${c.queue && i < cur ? " played" : ""}" data-i="${i}"${drag ? ' draggable="true"' : ""}>
+      ${drag ? '<span class="grip" title="Drag to reorder">⋮⋮</span>' : ""}
+      <span class="thumb"><img src="${artUrl(s)}" alt="">${playing ? '<span class="eqi"><i></i><i></i><i></i></span>' : ""}</span>
+      <span class="sm"><span class="st">${esc(s.title)}</span><span class="ss">${esc(s.artist)}${s.album ? " · " + esc(s.album) : ""}</span></span>
+      <span class="sd">${fmtLen(s.duration)}</span>
+      ${c.pick ? `<button class="pick${picked ? " on" : ""}" data-act="pick">${picked ? "✓" : "＋"}</button>` :
+        `<button class="fav${s.fav ? " on" : ""}" data-act="fav" title="Favorite">${s.fav ? "♥" : "♡"}</button><button class="more" data-act="more" title="More">⋯</button>`}
+    </li>`;
+  }).join("")}</ol>`;
+}
+let curList = [];
+const folderBg = f => { const h = hueOf(f.id); return `background:linear-gradient(135deg,hsl(${h},55%,42%),hsl(${(h + 40) % 360},65%,26%))`; };
+const folderCard = f => `<button class="card" data-act="open-folder" data-id="${esc(f.id)}"><div class="cover blank folder-cov" style="${folderBg(f)}">📁</div><div class="cn">${esc(f.name)}</div><div class="cs">Folder · ${plural(inFolder(f).length, "playlist")}</div></button>`;
+const newTiles = inside => `<button class="card" data-act="new-pl"><div class="cover blank plus">＋</div><div class="cn">New Playlist</div><div class="cs">&nbsp;</div></button>` +
+  (inside ? "" : `<button class="card" data-act="new-folder"><div class="cover blank plus">📁</div><div class="cn">New Folder</div><div class="cs">Group playlists</div></button>`) +
+  `<button class="card" data-act="import-folder" title="Make a playlist from a folder of music on this device"><div class="cover blank plus">📂</div><div class="cn">Import Folder</div><div class="cs">Folder → playlist</div></button>`;
+function go(v) { view = v; if (["playlists", "songs", "artists", "albums", "queue"].includes(v.type)) store.set("libView", v.type); query = ""; $("#libSearch").value = ""; closeMenu(); render(); LP.scrollTop = 0; }
+function render() {
+  if (!libReady) return;
+  const t = view.type, sc = LP.scrollTop;
+  const navOf = { playlist: "playlists", pick: "playlists", folder: "playlists", artist: "artists", album: "albums" };
+  $$("#libNav button").forEach(b => b.classList.toggle("active", !query && b.dataset.view === (navOf[t] || t)));
+  $("#emptyHint").classList.toggle("hidden", songs.length > 0 || tracks.length > 0);
+  rowCtx = null; curList = [];
+  let h = "";
+  const back = (to, label) => `<button class="back" data-act="go" data-to="${to}">‹ ${label}</button>`;
+  const q = query.toLowerCase(), match = s => !q || (s.title + " " + s.artist + " " + s.album).toLowerCase().includes(q);
+
+  if (!songs.length && t !== "queue" && !query) {
+    h = `<div class="lib-empty"><div class="big-ico">🎵</div><h3>Your library is empty</h3><p class="muted">Add songs from your device. They stay saved here for next time.</p><button class="btn primary" data-act="add-music">＋ Add music</button></div>`;
+  } else if (query && t !== "pick") {
+    const pls = [...SMART, ...playlists].filter(p => p.name.toLowerCase().includes(q));
+    curList = songs.filter(match);
+    const fls = folders.filter(f => f.name.toLowerCase().includes(q));
+    h = (pls.length || fls.length ? `<h4 class="sec">Playlists</h4><div class="grid">${fls.map(folderCard).join("")}${pls.map(p => card(p, "open-pl")).join("")}</div>` : "") +
+      `<h4 class="sec">Songs</h4>` + (curList.length ? songsHtml(curList) : `<p class="muted pad">No songs match “${esc(query)}”.</p>`);
+  } else if (t === "playlists") {
+    const loose = playlists.filter(p => !p.folderId || !getFolder(p.folderId));
+    h = `<div class="grid">${newTiles()}
+      ${SMART.map(p => card(p, "open-pl")).join("")}
+      ${folders.map(folderCard).join("")}
+      ${loose.map(p => card(p, "open-pl")).join("")}</div>`;
+  } else if (t === "folder") {
+    const f = getFolder(view.id); if (!f) { view = { type: "playlists" }; return render(); }
+    const pls = inFolder(f); curList = folderSongs(f);
+    h = back("playlists", "Playlists") + `<div class="pl-head"><div class="cover big blank folder-cov" style="${folderBg(f)}">📁</div><div class="pl-info"><h2>${esc(f.name)}</h2>
+      <p class="muted">${plural(pls.length, "playlist")}</p><div class="pl-tools"><button class="btn icon" data-act="folder-more" title="More">⋯</button></div></div></div>` +
+      head(f.name, curList) + `<div class="grid">${newTiles(true)}${pls.map(p => card(p, "open-pl")).join("")}</div>` +
+      (pls.length ? "" : `<p class="muted pad">This folder is empty. Make a playlist here, or open any playlist and use <b>⋯ → Move to folder</b>.</p>`);
+  } else if (t === "playlist") {
+    const p = getPl(view.id); if (!p) { view = { type: "playlists" }; return render(); }
+    curList = listOf(p);
+    const pf = p.folderId && getFolder(p.folderId);
+    h = (pf ? `<button class="back" data-act="open-folder" data-id="${esc(pf.id)}">‹ ${esc(pf.name)}</button>` : back("playlists", "Playlists")) + `<div class="pl-head">${cover(curList, p, true)}<div class="pl-info"><h2>${esc(p.name)}</h2>
+      ${p.smart ? "" : `<div class="pl-tools"><button class="btn" data-act="add-songs">＋ Add songs</button><button class="btn icon" data-act="pl-more" title="More">⋯</button></div>`}</div></div>` +
+      head(p.name, curList) + (curList.length ? songsHtml(curList, { pl: p }) :
+      `<p class="muted pad">${p.smart ? (p.id === "_fav" ? "Tap ♡ on any song to add it here." : "Songs you add will show up here.") : "This playlist is empty. Tap <b>＋ Add songs</b> to choose music."}</p>`);
+  } else if (t === "pick") {
+    const p = getPl(view.id); if (!p) { view = { type: "playlists" }; return render(); }
+    curList = songs.filter(match).sort((a, b) => a.title.localeCompare(b.title));
+    h = `<div class="pick-head"><span>Add to <b>${esc(p.name)}</b></span><button class="btn primary" data-act="open-pl" data-id="${esc(p.id)}">Done</button></div>` + songsHtml(curList, { pick: p });
+  } else if (t === "songs") {
+    const sort = store.get("sort", "title");
+    curList = [...songs].sort(sort === "recent" ? (a, b) => b.added - a.added : sort === "artist" ? (a, b) => a.artist.localeCompare(b.artist) || a.title.localeCompare(b.title) : (a, b) => a.title.localeCompare(b.title));
+    h = head("Songs", curList, `<select id="libSort" title="Sort"><option value="title">Title</option><option value="artist">Artist</option><option value="recent">Recently added</option></select>`) + songsHtml(curList);
+  } else if (t === "artists") {
+    const m = new Map(); songs.forEach(s => { if (!m.has(s.artist)) m.set(s.artist, []); m.get(s.artist).push(s); });
+    h = `<ul class="links">${[...m].sort((a, b) => a[0].localeCompare(b[0])).map(([n, l]) => { const a = l.find(s => s.art);
+      return `<li><button data-act="open-artist" data-name="${esc(n)}"><span class="avatar" style="${a ? "" : `background:hsl(${hueOf(n)},60%,40%)`}">${a ? `<img src="${artUrl(a)}" alt="">` : esc(n[0] || "?")}</span><span class="ln">${esc(n)}</span><span class="muted">${plural(l.length, "song")}</span><span class="chev">›</span></button></li>`; }).join("")}</ul>`;
+  } else if (t === "artist") {
+    curList = songs.filter(s => s.artist === view.name).sort((a, b) => a.album.localeCompare(b.album) || a.title.localeCompare(b.title));
+    h = back("artists", "Artists") + `<h2 class="vh">${esc(view.name)}</h2>` + head(view.name, curList) + songsHtml(curList);
+  } else if (t === "albums") {
+    const m = new Map(); songs.forEach(s => { const k = albumKey(s); if (!m.has(k)) m.set(k, []); m.get(k).push(s); });
+    h = `<div class="grid">${[...m].sort((a, b) => a[0].localeCompare(b[0])).map(([k, l]) =>
+      `<button class="card" data-act="open-album" data-key="${esc(k)}">${cover(l, { id: k })}<div class="cn">${esc(l[0].album || "Unknown album")}</div><div class="cs">${esc(l[0].artist)}</div></button>`).join("")}</div>`;
+  } else if (t === "album") {
+    curList = songs.filter(s => albumKey(s) === view.key).sort((a, b) => a.title.localeCompare(b.title));
+    const [al, ar] = view.key.split("\u0000");
+    h = back("albums", "Albums") + `<div class="pl-head">${cover(curList, { id: view.key }, true)}<div class="pl-info"><h2>${esc(al)}</h2><p class="muted">${esc(ar)}</p></div></div>` + head(al, curList) + songsHtml(curList);
+  } else if (t === "queue") {
+    curList = tracks;
+    h = `<div class="pl-btns-row"><span class="muted">${tracks.length ? `Playing ${cur + 1} of ${tracks.length}` : "Nothing queued"}</span>${tracks.length > 1 ? '<button class="btn" data-act="clear-queue">Clear upcoming</button>' : ""}</div>` +
+      (tracks.length ? songsHtml(tracks, { queue: true }) : `<p class="muted pad">Play a playlist, album or song and it shows up here. Use <b>⋯ → Play next</b> or <b>Add to queue</b> to line up more.</p>`);
+  }
+  V.innerHTML = h;
+  const so = $("#libSort"); if (so) { so.value = store.get("sort", "title"); so.onchange = () => { store.set("sort", so.value); render(); }; }
+  LP.scrollTop = sc;
+}
+
+V.addEventListener("click", e => {
+  const a = e.target.closest("[data-act]"), row = e.target.closest(".song");
+  if (row && rowCtx) {
+    const i = +row.dataset.i, s = rowCtx.list[i];
+    if (a && a.dataset.act === "fav") return toggleFav(s);
+    if (a && a.dataset.act === "more") { e.stopPropagation(); return songMenu(a, s, { ...rowCtx, i }); }
+    if (rowCtx.pick) { const p = rowCtx.pick; p.songIds.includes(s.id) ? p.songIds.splice(p.songIds.indexOf(s.id), 1) : p.songIds.push(s.id); savePl(p); return render(); }
+    if (rowCtx.queue) return load(i, true);
+    return playList(rowCtx.list, i);
+  }
+  if (!a) return;
+  const act = a.dataset.act, p = view.id && getPl(view.id);
+  if (act === "go") go({ type: a.dataset.to });
+  else if (act === "open-pl") go({ type: "playlist", id: a.dataset.id });
+  else if (act === "new-pl") newPlaylist(null, view.type === "folder" ? view.id : undefined).then(np => np && go({ type: "playlist", id: np.id }));
+  else if (act === "new-folder") newFolder();
+  else if (act === "open-folder") go({ type: "folder", id: a.dataset.id });
+  else if (act === "folder-more") { const f = getFolder(view.id); if (f) { e.stopPropagation(); menu(a, [{ label: "＋ New playlist here", fn: () => newPlaylist(null, f.id).then(np => np && go({ type: "playlist", id: np.id })) }, { label: "✎  Rename folder", fn: () => renameFolder(f) }, "-", { label: "Delete folder", danger: true, fn: () => deleteFolder(f) }]); } }
+  else if (act === "open-artist") go({ type: "artist", name: a.dataset.name });
+  else if (act === "open-album") go({ type: "album", key: a.dataset.key });
+  else if (act === "play-all") playList(curList, 0);
+  else if (act === "shuffle-all") playList(curList, 0, true);
+  else if (act === "add-songs" && p) go({ type: "pick", id: p.id });
+  else if (act === "add-music") $("#fileInput").click();
+  else if (act === "import-folder") $("#folderInput").click();
+  else if (act === "clear-queue") { tracks = cur >= 0 ? [tracks[cur]] : []; cur = tracks.length ? 0 : -1; render(); }
+  else if (act === "pl-more" && p) { e.stopPropagation(); menu(a, [{ label: "＋ Add songs", fn: () => go({ type: "pick", id: p.id }) }, { label: "✎  Rename", fn: () => renamePl(p) }, { label: "📁 Move to folder…", fn: () => folderMenu(a, p) }, "-", { label: "Delete playlist", danger: true, fn: () => deletePl(p) }]); }
+});
+// Drag songs to reorder a playlist
+let dragI = -1;
+V.addEventListener("dragstart", e => { const r = e.target.closest(".song"); if (!r || !rowCtx || !rowCtx.pl) return; dragI = +r.dataset.i; e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", "pulsewave-row"); r.classList.add("dragging"); });
+V.addEventListener("dragover", e => { if (dragI < 0) return; e.preventDefault(); e.stopPropagation(); const r = e.target.closest(".song"); $$(".song.drop").forEach(x => x.classList.remove("drop")); if (r) r.classList.add("drop"); });
+V.addEventListener("drop", e => { if (dragI < 0) return; e.preventDefault(); e.stopPropagation(); const r = e.target.closest(".song"), from = dragI; dragI = -1; if (r) movePl(rowCtx.pl, from, +r.dataset.i); else render(); });
+V.addEventListener("dragend", () => { if (dragI >= 0) { dragI = -1; render(); } });
+$$("#libNav button").forEach(b => b.onclick = () => go({ type: b.dataset.view }));
+$("#libSearch").oninput = e => { query = e.target.value.trim(); render(); };
+$("#folderInput").onchange = e => { importFolder(e.target.files); e.target.value = ""; };
+
+(async () => {
+  try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist(); } catch {}
+  songs = (await DB.all("songs")).filter(s => s.file instanceof Blob);
+  const all = (await DB.all("playlists")).sort((a, b) => a.created - b.created);
+  folders = all.filter(x => x.folder); playlists = all.filter(x => !x.folder);
+  libReady = true; render();
+})();
 
 /* ---------- Controls ---------- */
 const fmt = s => isFinite(s) ? `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}` : "0:00";
@@ -232,14 +626,13 @@ $("#shuffleBtn").onclick = () => { shuffle = !shuffle; syncModes(); };
 $("#repeatBtn").onclick = () => { repeat = { off: "all", all: "one", one: "off" }[repeat]; syncModes(); };
 syncModes();
 ["#fileInput", "#fileInput2"].forEach(s => $(s).onchange = e => { addFiles(e.target.files); e.target.value = ""; });
-$("#clearBtn").onclick = () => { audio.pause(); audio.removeAttribute("src"); tracks.forEach(t => URL.revokeObjectURL(t.url)); tracks = []; cur = -1; setMeta(); renderPlaylist(); };
 
 // Drag and drop
 let dragN = 0;
-addEventListener("dragenter", e => { e.preventDefault(); dragN++; $("#dropOverlay").classList.remove("hidden"); });
-addEventListener("dragleave", () => { if (--dragN <= 0) { dragN = 0; $("#dropOverlay").classList.add("hidden"); } });
+addEventListener("dragenter", e => { if (!e.dataTransfer || ![...e.dataTransfer.types].includes("Files")) return; e.preventDefault(); dragN++; $("#dropOverlay").classList.remove("hidden"); });
+addEventListener("dragleave", () => { if (!dragN) return; if (--dragN <= 0) { dragN = 0; $("#dropOverlay").classList.add("hidden"); } });
 addEventListener("dragover", e => e.preventDefault());
-addEventListener("drop", e => { e.preventDefault(); dragN = 0; $("#dropOverlay").classList.add("hidden"); addFiles(e.dataTransfer.files); });
+addEventListener("drop", e => { e.preventDefault(); dragN = 0; $("#dropOverlay").classList.add("hidden"); if (e.dataTransfer.files.length) addFiles(e.dataTransfer.files); });
 
 // Media keys / lock screen
 if ("mediaSession" in navigator) {
@@ -288,16 +681,23 @@ const Lyrics = (() => {
   let show = store.get("lyShow", true), online = store.get("lyOnline", true), size = store.get("lySize", 100);
   const key = t => "ly:" + (t.artist + "|" + t.title).toLowerCase();
 
+  const T = (m, s) => +m * 60 + parseFloat(String(s).replace(":", "."));
+  function words(txt) {   // enhanced LRC word timing: <mm:ss.xx>word
+    if (!/<\d+:\d/.test(txt)) return { text: txt, words: null };
+    const ws = [], re = /<(\d{1,3}):(\d{1,2}(?:[.:]\d{1,3})?)>([^<]*)/g; let m;
+    while ((m = re.exec(txt))) if (m[3].trim()) ws.push({ t: T(m[1], m[2]), text: m[3].trim() });
+    return { text: ws.map(w => w.text).join(" "), words: ws.length ? ws : null };
+  }
   function parse(text) {
     const out = []; let off = 0, any = false;
     (text || "").replace(/\r/g, "").split("\n").forEach(raw => {
       const o = raw.match(/^\[offset:\s*([+-]?\d+)\]/i); if (o) { off = +o[1] / 1000; return; }
       const tags = [...raw.matchAll(/\[(\d{1,3}):(\d{1,2}(?:[.:]\d{1,3})?)\]/g)];
       const txt = raw.replace(/\[[^\]]*\]/g, "").trim();
-      if (tags.length) { any = true; tags.forEach(m => out.push({ t: +m[1] * 60 + parseFloat(m[2].replace(":", ".")), text: txt })); }
-      else if (txt && !/^\[\w+:.*\]$/.test(raw.trim())) out.push({ t: null, text: txt });
+      if (tags.length) { any = true; tags.forEach(m => { const w = words(txt); out.push({ t: T(m[1], m[2]), text: w.text, words: w.words }); }); }
+      else if (txt && !/^\[\w+:.*\]$/.test(raw.trim())) out.push({ t: null, text: words(txt).text });
     });
-    if (any) { const s = out.filter(l => l.t != null).sort((a, b) => a.t - b.t); s.forEach(l => l.t -= off); return { lines: s, synced: true }; }
+    if (any) { const s = out.filter(l => l.t != null).sort((a, b) => a.t - b.t); s.forEach(l => { l.t -= off; if (l.words) l.words.forEach(w => w.t -= off); }); return { lines: s, synced: true }; }
     return { lines: out, synced: false };
   }
 
@@ -349,7 +749,15 @@ const Lyrics = (() => {
 
   function set(text, src) {
     const p = parse(text); lines = p.lines; synced = p.synced; idx = -2;
-    box.innerHTML = ""; lines.forEach(l => { const d = document.createElement("div"); d.className = "ly-line"; d.textContent = l.text || "♪"; box.appendChild(d); });
+    box.innerHTML = "";
+    lines.forEach(l => {
+      const d = document.createElement("div"); d.className = "ly-line";
+      const ws = l.words ? l.words.map(w => w.text) : (l.text || "♪").split(/\s+/).filter(Boolean);
+      l.spans = ws.map((w, k) => { if (k) d.appendChild(document.createTextNode(" ")); const s = document.createElement("span"); s.className = "w"; s.textContent = w; d.appendChild(s); return s; });
+      const total = ws.reduce((a, w) => a + w.length + 1, 0) || 1; let acc = 0;
+      l.cum = ws.map(w => { const a = acc / total; acc += w.length + 1; return [a, acc / total]; });
+      box.appendChild(d);
+    });
     ta.value = text || "";
     status.textContent = lines.length ? `${src} · ${synced ? "synced" : "not synced (scrolls with the song)"}` : "No lyrics found. Paste some below, or add a .lrc file.";
     el.classList.toggle("empty", !lines.length);
@@ -358,9 +766,9 @@ const Lyrics = (() => {
 
   async function load(t) {
     track = t; set("", ""); status.textContent = "Looking for lyrics…";
-    if (!t) return;
+    if (!t) { status.textContent = "Play a song to see its lyrics."; return; }
     let text = store.get(key(t), null), src = "Saved";
-    if (!text && t.lrcFile) { text = await t.lrcFile.text(); src = "From .lrc file"; }
+    if (!text && t.lrc) { text = t.lrc; src = "From .lrc file"; }
     if (!text) { text = await fromId3(t.file).catch(() => null); src = "From the song file"; }
     if (!text && online) { text = await fromOnline(t); src = "From LRCLIB"; }
     if (track !== t) return;           // the song changed while we were searching
@@ -374,10 +782,30 @@ const Lyrics = (() => {
     let i;
     if (synced) { i = -1; for (let j = 0; j < lines.length && lines[j].t <= ct; j++) i = j; }
     else i = Math.min(lines.length - 1, Math.floor((ct / audio.duration) * lines.length * 1.05));
-    if (i === idx) return; idx = i;
-    [...box.children].forEach((d, j) => { const dist = Math.abs(j - i); d.className = "ly-line" + (j === i ? " cur" : dist === 1 ? " near" : dist > 3 ? " far" : ""); });
-    const c = box.children[Math.max(0, i)];
-    if (c) box.style.transform = `translateY(${-(c.offsetTop + c.offsetHeight / 2)}px)`;
+    el.style.setProperty("--beat", Math.min(1, beat || 0).toFixed(2));
+    if (i !== idx) {
+      if (lines[idx] && lines[idx].spans) lines[idx].spans.forEach(s => s.className = "w");
+      idx = i;
+      [...box.children].forEach((d, j) => { const dist = Math.abs(j - i); d.className = "ly-line" + (j === i ? " cur" : dist === 1 ? " near" : dist > 3 ? " far" : ""); });
+      const c = box.children[Math.max(0, i)];
+      if (c) box.style.transform = `translateY(${-(c.offsetTop + c.offsetHeight / 2)}px)`;
+    }
+    if (!synced || i < 0) return;
+    // Karaoke sweep: colour each word as it is sung
+    const L = lines[i], nx = lines[i + 1], clamp = v => Math.max(0, Math.min(1, v));
+    let wi = 0, wp = 0;
+    if (L.words) {
+      wi = -1; for (let k = 0; k < L.words.length; k++) if (L.words[k].t <= ct) wi = k;
+      if (wi < 0) wi = 0;
+      else { const st = L.words[wi].t, en = L.words[wi + 1] ? L.words[wi + 1].t : Math.min(nx ? nx.t : Infinity, st + 1.2); wp = clamp((ct - st) / Math.max(0.05, en - st)); }
+    } else {
+      const dur = Math.min((nx ? nx.t : audio.duration) - L.t, Math.max(1.2, L.text.length * 0.085));
+      const p = clamp((ct - L.t) / Math.max(0.1, dur));
+      wi = L.cum.findIndex(c => p < c[1]);
+      if (wi < 0) { wi = L.spans.length - 1; wp = 1; } else wp = clamp((p - L.cum[wi][0]) / (L.cum[wi][1] - L.cum[wi][0]));
+    }
+    L.spans.forEach((s, k) => { const c = k < wi || (k === wi && wp >= 1) ? "w sung" : k === wi ? "w sing" : "w"; if (s.className !== c) s.className = c; });
+    if (L.spans[wi]) L.spans[wi].style.setProperty("--wp", (wp * 100).toFixed(1) + "%");
   }
   requestAnimationFrame(tick);
 
@@ -387,12 +815,15 @@ const Lyrics = (() => {
     store.set("lyShow", show); store.set("lyOnline", online); store.set("lySize", size);
   }
   $("#lyricsBtn").onclick = () => { show = !show; apply(); };
+  $("#karaokeBtn").onclick = () => { setKaraoke(!karaoke); if (karaoke) { if (!show) { show = true; apply(); } toast("Karaoke mode on: the singer's voice is turned down"); } else toast("Karaoke mode off"); };
+  $("#karaokeOn").onchange = e => setKaraoke(e.target.checked);
+  setKaraoke(karaoke);
   $("#lyOnline").onchange = e => { online = e.target.checked; apply(); };
   $("#lySize").oninput = e => { size = +e.target.value; apply(); };
   $("#lySave").onclick = () => { if (!track) return; store.set(key(track), ta.value); set(ta.value, "Saved"); };
   $("#lySearch").onclick = async () => { if (!track) return; status.textContent = "Searching LRCLIB…"; const t = await fromOnline(track); t ? set(t, "From LRCLIB") : (status.textContent = "Nothing found online for this song."); };
   $("#lyForget").onclick = () => { if (!track) return; try { localStorage.removeItem("pw." + key(track)); } catch {} load(track); };
-  $("#lyFile").onchange = async e => { const f = e.target.files[0]; e.target.value = ""; if (f && track) { track.lrcFile = f; set(await f.text(), "From .lrc file"); } };
+  $("#lyFile").onchange = async e => { const f = e.target.files[0]; e.target.value = ""; if (f && track) { track.lrc = await f.text(); saveSong(track); set(track.lrc, "From .lrc file"); } };
   const nudge = d => { offset = Math.round((offset + d) * 10) / 10; $("#lyOffset").textContent = offset.toFixed(1) + " s"; if (track) store.set(key(track) + ":off", offset); idx = -2; };
   $("#lyEarlier").onclick = () => nudge(0.5); $("#lyLater").onclick = () => nudge(-0.5);
   apply();
@@ -511,7 +942,7 @@ const help = v => $("#helpModal").classList.toggle("hidden", !v);
 $("#helpBtn").onclick = () => help(true); $("#helpClose").onclick = () => help(false);
 $("#helpModal").onclick = e => { if (e.target.id === "helpModal") help(false); };
 addEventListener("keydown", e => {
-  if (!$("#intro").classList.contains("hidden") || e.target.matches("input[type=text],select,textarea")) return;
+  if (!$("#intro").classList.contains("hidden") || e.target.matches("input[type=text],input[type=search],select,textarea")) return;
   const k = e.key;
   if (k === " ") { e.preventDefault(); toggle(); }
   else if (k === "ArrowRight") { e.preventDefault(); e.shiftKey ? audio.currentTime += 10 : next(false); }
@@ -524,6 +955,7 @@ addEventListener("keydown", e => {
   else if (/^[vV]$/.test(k)) setMode(MODES[(MODES.indexOf(mode) + 1) % MODES.length]);
   else if (/^[fF]$/.test(k)) fs();
   else if (/^[lL]$/.test(k)) Lyrics.toggle();
+  else if (/^[kK]$/.test(k)) $("#karaokeBtn").click();
   else if (/^[hH?]$/.test(k)) help($("#helpModal").classList.contains("hidden"));
   else if (k === "Escape") help(false);
 });

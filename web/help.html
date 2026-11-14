@@ -15,7 +15,7 @@ details{margin:10px 0}summary{cursor:pointer;font-weight:600}
 </style></head><body>
 <header><img src="logo.svg" alt=""><h1>Pulsewave User Manual</h1><p class="muted">Version 1.1 · Created by <strong>Ryan Ocbina Barnal</strong></p></header>
 <main>
-<nav><a href="#start">Getting started</a><a href="#install">Installing</a><a href="#play">Playing music</a><a href="#viz">Visual effects</a><a href="#eq">Equalizer</a><a href="#lyrics">Lyrics</a><a href="#keys">Shortcuts</a><a href="#faq">FAQ &amp; troubleshooting</a></nav>
+<nav><a href="#start">Getting started</a><a href="#install">Installing</a><a href="#play">Playing music</a><a href="#library">Library &amp; playlists</a><a href="#viz">Visual effects</a><a href="#eq">Equalizer</a><a href="#lyrics">Lyrics</a><a href="#keys">Shortcuts</a><a href="#faq">FAQ &amp; troubleshooting</a></nav>
 
 <section id="start"><h2>1. Getting started</h2>
 <ol><li>Open Pulsewave. The animated intro plays.</li>
@@ -35,7 +35,35 @@ details{margin:10px 0}summary{cursor:pointer;font-weight:600}
 <table><tr><td>▶ / ⏸</td><td>Play or pause</td></tr><tr><td>⏮ ⏭</td><td>Previous / next track. Previous restarts the song if it has played for more than 3 seconds.</td></tr>
 <tr><td>🔀</td><td>Shuffle on or off</td></tr><tr><td>🔁 / 🔂</td><td>Repeat: off → repeat all → repeat one</td></tr>
 <tr><td>Seek bar</td><td>Drag to jump within the song</td></tr><tr><td>🔊 + slider</td><td>Volume. Click the speaker to mute.</td></tr></table>
-<p><b>Playlist tab:</b> tap a song to play it. Press ✕ to remove a song and <b>Clear</b> to empty the list. You can also control playback from your keyboard's media keys, your phone's lock screen or Bluetooth headphones.</p></section>
+<p>Tap any song in the Library to play it. The rest of that list plays after it. You can also control playback from your keyboard's media keys, your phone's lock screen or Bluetooth headphones.</p></section>
+
+<section id="library"><h2>3b. Library &amp; playlists</h2>
+<p>Every song you add is saved in your <b>Library</b> on this device, so it is still there next time. Nothing is uploaded. The Library tab has five sections:</p>
+<ul><li><b>Playlists:</b> your playlists, plus two automatic ones. <em>Favorite Songs</em> holds every song you tap ♡ on. <em>Recently Added</em> holds your newest songs.</li>
+<li><b>Songs:</b> everything in your library. Sort by title, artist or recently added.</li>
+<li><b>Artists</b> and <b>Albums:</b> grouped automatically. Pulsewave reads the title, artist, album and cover art stored in MP3 files.</li>
+<li><b>Up Next:</b> the play queue. Shows what is playing now and what comes after.</li></ul>
+<h3>Make a playlist</h3>
+<ol><li>Open <b>Library → Playlists</b> and tap <b>＋ New Playlist</b>.</li><li>Give it a name and tap <b>Create</b>.</li><li>Tap <b>＋ Add songs</b>, tick the songs you want with <b>＋</b>, then tap <b>Done</b>.</li></ol>
+<p>You can also tap <b>⋯</b> on any song → <b>Add to playlist…</b>, and pick a playlist or make a new one right there.</p>
+<h3>Edit a playlist</h3>
+<ul><li><b>Reorder:</b> on a computer, drag a song by its <b>⋮⋮</b> handle. On a phone, use <b>⋯ → Move up / Move down</b>.</li>
+<li><b>Remove a song:</b> <b>⋯ → Remove from this playlist</b>. The song stays in your library.</li>
+<li><b>Rename or delete:</b> tap <b>⋯</b> next to <b>＋ Add songs</b>.</li>
+<li>The playlist cover is made from the album art of its songs.</li></ul>
+<h3>Playlist folders</h3>
+<p>Folders keep your playlists organized, for example <em>Workout</em>, <em>Chill</em> or <em>Party</em>.</p>
+<ul><li><b>Make a folder:</b> <b>Library → Playlists → 📁 New Folder</b>.</li>
+<li><b>Put a playlist in a folder:</b> open the playlist → <b>⋯ → Move to folder…</b>. Choose <b>No folder</b> to take it out again.</li>
+<li><b>New playlist inside a folder:</b> open the folder and tap <b>＋ New Playlist</b>.</li>
+<li><b>Play a whole folder:</b> open it and tap <b>▶ Play</b> or <b>🔀 Shuffle</b>. All songs from all its playlists play.</li>
+<li><b>Rename or delete a folder:</b> open it and tap <b>⋯</b>. Deleting a folder keeps its playlists. They move back to Playlists.</li></ul>
+<h3>Import a folder of music</h3>
+<p>Tap <b>📂 Import Folder</b> and choose a folder on your computer. Every song in it is added to your library and saved as a playlist named after the folder. Subfolders each become their own playlist. If you are inside a playlist folder when you import, the new playlists go into that folder. Phones may not allow picking whole folders. Use <b>＋ Add</b> there instead.</p>
+<h3>Song menu (⋯)</h3>
+<p><b>Play next</b>, <b>Add to queue</b>, <b>Add to playlist</b>, <b>Favorite</b>, <b>Go to artist</b>, <b>Go to album</b> and <b>Delete from library</b>.</p>
+<h3>Search</h3><p>Type in the search box at the top of the Library. It searches song titles, artists, albums and playlist names.</p>
+<p class="muted">Note: the web app, the Windows app and the Mac app each keep their own library. Browsers can remove saved data if your device runs very low on space.</p></section>
 
 <section id="viz"><h2>4. Visual effects</h2>
 <p>Pick an effect with the buttons at the top left of the visuals:</p>
@@ -54,6 +82,11 @@ details{margin:10px 0}summary{cursor:pointer;font-weight:600}
 <li><b>A .lrc file</b> with the same name as the song, for example <code>Artist - Title.mp3</code> + <code>Artist - Title.lrc</code>. Add both files together. You can also add the .lrc file later, or press <b>Load .lrc</b>.</li>
 <li><b>Lyrics stored inside the song file.</b> Many MP3s carry them.</li>
 <li><b>Online search</b> in the free LRCLIB lyrics database. This sends the song's title, artist and length to lrclib.net. Turn it off with <b>Find lyrics online automatically</b>.</li></ol>
+<h3>Karaoke mode 🎙</h3>
+<p>Press <b>🎙 Karaoke</b> above the visuals, press <kbd>K</kbd>, or switch on <b>Karaoke mode</b> in the Lyrics tab. Pulsewave turns down the singer's voice and keeps the music and bass. Any song becomes a karaoke track. The lyrics light up word by word as they are sung, and the current line pulses with the beat.</p>
+<p class="muted">How it works: most studio songs put the lead voice in the center of the stereo mix. Karaoke mode cancels what is in the center. It works best on stereo studio recordings. Live recordings, mono songs, or songs with lots of echo on the voice may keep some of the vocals. Drums and instruments that are also in the center get quieter too.</p>
+<h3>Word-by-word timing</h3>
+<p>With a normal synced .lrc file, Pulsewave sweeps the color across each line in time with it. For exact word timing, use an "enhanced" .lrc file with a time before each word, for example:<br><code>[00:12.00] &lt;00:12.00&gt;Feel &lt;00:12.40&gt;the &lt;00:12.70&gt;beat</code></p>
 <h3>Synced or not synced</h3>
 <p><b>Synced</b> lyrics (.lrc, with times like <code>[01:23.45]</code>) move exactly with the singer. <b>Plain</b> lyrics have no times, so Pulsewave scrolls them evenly through the song.</p>
 <h3>Lyrics tab</h3>
@@ -65,12 +98,12 @@ details{margin:10px 0}summary{cursor:pointer;font-weight:600}
 <p class="muted">Tip: in full-screen mode (<kbd>F</kbd>) the lyrics get bigger, which is good for karaoke on a TV.</p></section>
 
 <section id="keys"><h2>7. Keyboard shortcuts</h2>
-<table><tr><td><kbd>Space</kbd></td><td>Play / pause</td></tr><tr><td><kbd>←</kbd> <kbd>→</kbd></td><td>Previous / next track</td></tr><tr><td><kbd>Shift</kbd> + <kbd>←</kbd> / <kbd>→</kbd></td><td>Skip back / forward 10 seconds</td></tr><tr><td><kbd>↑</kbd> <kbd>↓</kbd></td><td>Volume</td></tr><tr><td><kbd>M</kbd></td><td>Mute</td></tr><tr><td><kbd>S</kbd></td><td>Shuffle</td></tr><tr><td><kbd>R</kbd></td><td>Repeat mode</td></tr><tr><td><kbd>V</kbd></td><td>Next visual effect</td></tr><tr><td><kbd>F</kbd></td><td>Full-screen visuals</td></tr><tr><td><kbd>L</kbd></td><td>Show / hide lyrics</td></tr><tr><td><kbd>H</kbd></td><td>Help</td></tr></table></section>
+<table><tr><td><kbd>Space</kbd></td><td>Play / pause</td></tr><tr><td><kbd>←</kbd> <kbd>→</kbd></td><td>Previous / next track</td></tr><tr><td><kbd>Shift</kbd> + <kbd>←</kbd> / <kbd>→</kbd></td><td>Skip back / forward 10 seconds</td></tr><tr><td><kbd>↑</kbd> <kbd>↓</kbd></td><td>Volume</td></tr><tr><td><kbd>M</kbd></td><td>Mute</td></tr><tr><td><kbd>S</kbd></td><td>Shuffle</td></tr><tr><td><kbd>R</kbd></td><td>Repeat mode</td></tr><tr><td><kbd>V</kbd></td><td>Next visual effect</td></tr><tr><td><kbd>F</kbd></td><td>Full-screen visuals</td></tr><tr><td><kbd>L</kbd></td><td>Show / hide lyrics</td></tr><tr><td><kbd>K</kbd></td><td>Karaoke mode</td></tr><tr><td><kbd>H</kbd></td><td>Help</td></tr></table></section>
 
 <section id="faq"><h2>8. FAQ &amp; troubleshooting</h2>
 <details><summary>No sound</summary><p>Check the volume slider and the mute button, and your device's volume. On iPhone, also check the silent switch. Make sure you pressed <b>Tap to start</b>, because browsers only allow sound after a tap.</p></details>
 <details><summary>A song won't play</summary><p>Your device may not support that format. Convert it to MP3 or M4A.</p></details>
-<details><summary>My playlist is empty after reopening</summary><p>For your privacy, songs are not stored. Add them again each session. Pulsewave does remember your equalizer, volume, theme and effect.</p></details>
+<details><summary>My songs disappeared</summary><p>Songs are saved in the browser or app you added them in. They are not shared between your phone, the website and the desktop app. Private or incognito windows forget everything when closed. Clearing your browser's site data also removes them.</p></details>
 <details><summary>No lyrics appear</summary><p>Check the Lyrics tab. If it says nothing was found, the song may not be in LRCLIB, or its name may not match. Rename the file to <code>Artist - Title</code> and press <b>Search online</b>, or paste the lyrics yourself.</p></details>
 <details><summary>The visuals are slow on my phone</summary><p>Try the <b>Bars</b> or <b>Wave</b> effect. They use the least power.</p></details>
 <details><summary>Windows or macOS warns about the app</summary><p>The installers are not code-signed yet. Follow the steps in <a href="#install">Installing</a>.</p></details>

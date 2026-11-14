@@ -7,9 +7,11 @@
 ## Features
 - Animated intro
 - 5 visual effects (Bars, Wave, Radial, Galaxy, Tunnel), 5 color themes and beat-reactive glow
-- Karaoke-style lyrics over the visuals (.lrc files, lyrics inside MP3s, LRCLIB online search, or paste your own)
+- Karaoke mode: turns down the singer's voice, and lyrics fill word by word and pulse with the beat
+- Lyrics over the visuals (.lrc files, lyrics inside MP3s, LRCLIB online search, or paste your own)
 - 10-band equalizer with 12 presets, bass boost and balance
-- Playlist, shuffle, repeat, drag and drop, media keys and lock-screen controls
+- Apple Music–style library: playlists, favorites, songs, artists, albums, album art, search, Up Next queue (saved on the device)
+- Shuffle, repeat, drag and drop, media keys and lock-screen controls
 - Installable on phones (PWA), plus Windows (.exe) and macOS (.dmg) installers
 - Built-in help and a full user manual
 
