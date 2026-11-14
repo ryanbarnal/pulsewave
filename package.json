@@ -4,7 +4,7 @@
   "version": "1.0.0",
   "description": "Music player with visual effects and a 10-band equalizer",
   "author": "Ryan Ocbina Barnal",
-  "license": "UNLICENSED",
+  "license": "GPL-3.0-only",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
