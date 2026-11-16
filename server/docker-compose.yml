@@ -1,18 +1,32 @@
 # Pulsewave Server for QNAP Container Station (Applications → Create → paste this)
-# Change the two folder paths on the left of ":" if your music lives somewhere else.
+# 1. Change the music folder path if your music lives somewhere else.
+# 2. Paste your Cloudflare Tunnel token (see https://pulsewave.ryanbarnal.com/family-server.html).
 services:
   pulsewave:
     image: ghcr.io/ryanbarnal/pulsewave-server:latest
     container_name: pulsewave
     restart: unless-stopped
     ports:
-      - "8095:8095"
+      - "8095:8095"            # at home: http://NAS-IP:8095
     environment:
       SERVER_NAME: "Barnal Family Music"
+      PUBLIC_URL: "https://media.ryanbarnal.com"
+      TRUST_PROXY: "1"         # visitors arrive through Cloudflare; use their real address for lock-outs
       RESCAN_HOURS: "6"
     volumes:
-      # your music folder on the NAS (Pulsewave never deletes or changes your files;
+      # your music folder (Pulsewave never deletes or changes your files;
       # songs the family adds go into a "Pulsewave Uploads" folder inside it)
       - /share/Multimedia/Music:/music
-      # accounts, playlists, favorites, lyrics and cover-art cache
+      # accounts, playlists, favorites, listen links, lyrics and cover-art cache
       - /share/Container/pulsewave:/data
+
+  # Publishes the server securely at https://media.ryanbarnal.com, with no router changes
+  tunnel:
+    image: cloudflare/cloudflared:2024.12.2
+    container_name: pulsewave-tunnel
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run
+    environment:
+      TUNNEL_TOKEN: "PASTE-YOUR-CLOUDFLARE-TUNNEL-TOKEN-HERE"
+    depends_on:
+      - pulsewave

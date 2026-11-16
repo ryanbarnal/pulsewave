@@ -19,7 +19,7 @@
 - Built-in help and a full user manual
 
 ## Family server (QNAP / any NAS with Docker)
-`server/` is **Pulsewave Server**, a private family music server. It streams your NAS music folder to the Pulsewave app, with an account per family member, shared playlists, uploads and shared lyrics. The image is `ghcr.io/ryanbarnal/pulsewave-server` (amd64 + arm64), and `server/docker-compose.yml` is ready for QNAP Container Station. See the [setup guide](https://pulsewave.ryanbarnal.com/family-server.html).
+`server/` is **Pulsewave Server**, a private family music server. It streams your NAS music folder to the Pulsewave app, with an account per family member, shared playlists, listen links (no account needed), uploads and shared lyrics. A Cloudflare Tunnel publishes it at https://media.ryanbarnal.com so the website can use it from anywhere. The image is `ghcr.io/ryanbarnal/pulsewave-server` (amd64 + arm64), and `server/docker-compose.yml` is ready for QNAP Container Station. See the [setup guide](https://pulsewave.ryanbarnal.com/family-server.html).
 
 ## Project layout
 | Path | What it is |

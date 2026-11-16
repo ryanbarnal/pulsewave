@@ -9,13 +9,15 @@ import { fileURLToPath } from "node:url";
 import { parseFile } from "music-metadata";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const VERSION = "1.0.0";
+const VERSION = "1.1.0";
 const PORT = +(process.env.PORT || 8095);
 const MUSIC_DIR = path.resolve(process.env.MUSIC_DIR || "/music");
 const DATA_DIR = path.resolve(process.env.DATA_DIR || "/data");
 const WEB_DIR = path.resolve(process.env.WEB_DIR || path.join(HERE, "..", "web"));
 const UPLOAD_DIR = path.resolve(process.env.UPLOAD_DIR || path.join(MUSIC_DIR, "Pulsewave Uploads"));
 const SERVER_NAME = process.env.SERVER_NAME || "Family Music";
+const PUBLIC_URL = (process.env.PUBLIC_URL || "").replace(/\/+$/, "");   // e.g. https://media.ryanbarnal.com
+const TRUST_PROXY = !!process.env.TRUST_PROXY;                          // behind Cloudflare Tunnel: use the visitor's real IP
 const RESCAN_HOURS = +(process.env.RESCAN_HOURS || 6);
 const AUDIO_EXT = new Set([".mp3", ".m4a", ".aac", ".flac", ".ogg", ".oga", ".opus", ".wav", ".webm", ".alac", ".aiff", ".aif"]);
 const MIME = {
@@ -38,7 +40,8 @@ const db = {
   users: load("users", {}),          // name -> { hash, salt, admin, upload, created, lastSeen }
   sessions: load("sessions", {}),    // sha256(token) -> { user, created, seen }
   library: load("library", { songs: {}, scannedAt: 0 }),
-  hidden: load("hidden", {})         // song id -> true (removed by admin)
+  hidden: load("hidden", {}),        // song id -> true (removed by admin)
+  shares: load("shares", {})         // listen-link id -> { owner, playlistId, created }
 };
 const saveUsers = () => save("users", db.users);
 let sessT = 0; const saveSessions = () => { clearTimeout(sessT); sessT = setTimeout(() => save("sessions", db.sessions), 2000); };
@@ -76,7 +79,7 @@ function auth(req, url) {
 }
 // brute-force protection: 10 failed logins per IP per 15 minutes
 const fails = new Map();
-const ipOf = req => (req.socket.remoteAddress || "").replace(/^::ffff:/, "");
+const ipOf = req => (TRUST_PROXY && (req.headers["cf-connecting-ip"] || String(req.headers["x-forwarded-for"] || "").split(",")[0].trim())) || (req.socket.remoteAddress || "").replace(/^::ffff:/, "");
 const tooMany = ip => { const f = fails.get(ip); return f && f.n >= 10 && Date.now() - f.t < 15 * 60e3; };
 const failed = ip => { const f = fails.get(ip); if (!f || Date.now() - f.t > 15 * 60e3) fails.set(ip, { n: 1, t: Date.now() }); else f.n++; };
 
@@ -154,6 +157,14 @@ const userFile = n => path.join(DATA_DIR, "users", sha("u:" + n).slice(0, 24) + 
 const readUser = n => { try { return JSON.parse(fs.readFileSync(userFile(n), "utf8")); } catch { return { favs: [], plays: {}, playlists: [], folders: [] }; } };
 const writeUser = (n, d) => { const f = userFile(n); fs.writeFileSync(f + ".tmp", JSON.stringify(d)); fs.renameSync(f + ".tmp", f); };
 
+// Listen links: anyone with the link can play that one playlist (always the owner's current version)
+function shareSongs(id) {
+  const sh = db.shares[id]; if (!sh || !db.users[sh.owner]) return null;
+  const pl = (readUser(sh.owner).playlists || []).find(x => x.id === sh.playlistId); if (!pl) return null;
+  const songs = (pl.songIds || []).map(i => db.library.songs[i]).filter(s => s && !db.hidden[s.id]);
+  return { share: sh, pl, songs, ids: new Set(songs.map(s => s.id)) };
+}
+
 /* ---------------- HTTP helpers ---------------- */
 function send(res, code, body, headers = {}) {
   const isObj = body && typeof body === "object" && !Buffer.isBuffer(body);
@@ -192,12 +203,12 @@ const safeName = n => String(n || "").replace(/[\/\\:*?"<>|\x00-\x1f]/g, "_").re
 /* ---------------- routes ---------------- */
 async function api(req, res, url) {
   const p = url.pathname.replace(/^\/api\//, ""), M = req.method, ip = ipOf(req);
-  if (p === "info") return send(res, 200, { pulsewaveServer: true, name: SERVER_NAME, version: VERSION, setup: Object.keys(db.users).length === 0 });
+  if (p === "info") return send(res, 200, { pulsewaveServer: true, name: SERVER_NAME, version: VERSION, setup: Object.keys(db.users).length === 0, publicUrl: PUBLIC_URL || null });
 
   if (p === "setup" && M === "POST") {
     if (Object.keys(db.users).length) return err(res, 403, "Already set up");
     const b = await readJson(req);
-    if (!validName(b.name) || !b.password || String(b.password).length < 6) return err(res, 400, "Choose a name and a password of at least 6 characters");
+    if (!validName(b.name) || !b.password || String(b.password).length < 8) return err(res, 400, "Choose a name and a password of at least 8 characters");
     createUser(b.name.trim(), b.password, { admin: true });
     log(`setup: admin "${b.name.trim()}" created`);
     return send(res, 200, { token: newSession(b.name.trim()), user: publicUser(b.name.trim(), db.users[b.name.trim()]) });
@@ -211,15 +222,23 @@ async function api(req, res, url) {
     return send(res, 200, { token: newSession(real), user: publicUser(real, db.users[real]) });
   }
 
+  let sm;
+  if ((sm = /^s\/([A-Za-z0-9_-]{16,40})$/.exec(p)) && M === "GET") {
+    const sh = shareSongs(sm[1]); if (!sh) return err(res, 404, "This listen link was turned off or doesn't exist");
+    return send(res, 200, { name: sh.pl.name, owner: sh.share.owner, server: SERVER_NAME, songs: sh.songs.map(songOut) });
+  }
   const me = auth(req, url);
-  if (!me) return err(res, 401, "Please sign in");
+  const sid = url.searchParams.get("s");
+  const viaShare = !me && sid && M === "GET" && /^(stream|art|lyrics)\//.test(p) ? shareSongs(sid) : null;
+  if (!me && !viaShare) return err(res, 401, "Please sign in");
+  const allowed = id => !viaShare || viaShare.ids.has(id);
 
   if (p === "logout" && M === "POST") { delete db.sessions[me.tokenHash]; saveSessions(); return send(res, 200, { ok: true }); }
   if (p === "me") return send(res, 200, { user: publicUser(me.name, me) });
   if (p === "password" && M === "POST") {
     const b = await readJson(req);
     if (!checkPw(me.name, b.old || "")) return err(res, 403, "Current password is wrong");
-    if (!b.password || String(b.password).length < 6) return err(res, 400, "New password must be at least 6 characters");
+    if (!b.password || String(b.password).length < 8) return err(res, 400, "New password must be at least 8 characters");
     createUser(me.name, b.password, { admin: me.admin, upload: me.upload }); db.users[me.name].created = me.created; saveUsers();
     return send(res, 200, { ok: true });
   }
@@ -230,16 +249,16 @@ async function api(req, res, url) {
   }
   let m;
   if ((m = /^stream\/([0-9a-f]{20})$/.exec(p))) {
-    const s = db.library.songs[m[1]]; if (!s || db.hidden[s.id]) return err(res, 404, "Not found");
+    const s = db.library.songs[m[1]]; if (!s || db.hidden[s.id] || !allowed(s.id)) return err(res, 404, "Not found");
     return serveFile(req, res, s.abs, MIME[path.extname(s.abs).toLowerCase()] || "application/octet-stream", { "Cache-Control": "private, max-age=86400" });
   }
   if ((m = /^art\/([0-9a-f]{20})$/.exec(p))) {
-    const s = db.library.songs[m[1]]; if (!s || !s.art) return err(res, 404, "No art");
+    const s = db.library.songs[m[1]]; if (!s || !s.art || !allowed(s.id)) return err(res, 404, "No art");
     const f = s.art.startsWith("dir:") ? s.art.slice(4) : path.join(DATA_DIR, "art", s.art);
     return serveFile(req, res, f, MIME[path.extname(f).toLowerCase()] || "image/jpeg", { "Cache-Control": "private, max-age=604800" });
   }
   if ((m = /^lyrics\/([0-9a-f]{20})$/.exec(p))) {
-    const s = db.library.songs[m[1]]; if (!s) return err(res, 404, "Not found");
+    const s = db.library.songs[m[1]]; if (!s || !allowed(s.id)) return err(res, 404, "Not found");
     const own = path.join(DATA_DIR, "lyrics", s.id + ".lrc");
     if (M === "PUT") {
       const text = (await readBody(req, 512e3)).toString("utf8");
@@ -262,6 +281,23 @@ async function api(req, res, url) {
     for (const n of Object.keys(db.users)) if (n !== me.name)
       for (const pl of readUser(n).playlists || []) if (pl.shared) family.push({ ...pl, owner: n });
     return send(res, 200, { ...d, family });
+  }
+  if (p === "shares") {
+    if (M === "GET") return send(res, 200, { shares: Object.entries(db.shares).filter(([, s]) => s.owner === me.name).map(([id, s]) => ({ id, ...s })) });
+    if (M === "POST") {
+      const b = await readJson(req);
+      if (!(readUser(me.name).playlists || []).some(x => x.id === b.playlistId)) return err(res, 404, "Save the playlist first, then try again");
+      const ex = Object.entries(db.shares).find(([, s]) => s.owner === me.name && s.playlistId === b.playlistId);
+      if (ex) return send(res, 200, { id: ex[0] });
+      const id = crypto.randomBytes(16).toString("base64url");
+      db.shares[id] = { owner: me.name, playlistId: b.playlistId, created: Date.now() }; save("shares", db.shares);
+      log(`share: ${me.name} made a listen link`);
+      return send(res, 200, { id });
+    }
+  }
+  if ((m = /^shares\/([A-Za-z0-9_-]{16,40})$/.exec(p)) && M === "DELETE") {
+    const s = db.shares[m[1]]; if (!s || (s.owner !== me.name && !me.admin)) return err(res, 404, "Not found");
+    delete db.shares[m[1]]; save("shares", db.shares); return send(res, 200, { ok: true });
   }
   if (p === "upload" && M === "PUT") {
     if (!me.upload && !me.admin) return err(res, 403, "Ask the admin for permission to add music");
@@ -305,7 +341,7 @@ async function api(req, res, url) {
       const b = await readJson(req), name = String(b.name || "").trim();
       if (!validName(name)) return err(res, 400, "Names can use letters, numbers, spaces, dots, dashes (max 32)");
       if (Object.keys(db.users).some(n => n.toLowerCase() === name.toLowerCase())) return err(res, 409, "That name is taken");
-      if (!b.password || String(b.password).length < 6) return err(res, 400, "Password must be at least 6 characters");
+      if (!b.password || String(b.password).length < 8) return err(res, 400, "Password must be at least 8 characters");
       createUser(name, b.password, { admin: !!b.admin, upload: !!b.upload });
       log(`users: ${me.name} added "${name}"`);
       return send(res, 200, { user: publicUser(name, db.users[name]) });
@@ -317,13 +353,14 @@ async function api(req, res, url) {
     if (M === "DELETE") {
       if (name === me.name) return err(res, 400, "You can't remove yourself");
       delete db.users[name]; saveUsers();
+      for (const [k, s] of Object.entries(db.shares)) if (s.owner === name) delete db.shares[k]; save("shares", db.shares);
       for (const [k, s] of Object.entries(db.sessions)) if (s.user === name) delete db.sessions[k]; saveSessions();
       log(`users: ${me.name} removed "${name}"`);
       return send(res, 200, { ok: true });
     }
     if (M === "PATCH") {
       const b = await readJson(req);
-      if (b.password) { if (String(b.password).length < 6) return err(res, 400, "Password must be at least 6 characters"); const salt = crypto.randomBytes(16).toString("hex"); u.salt = salt; u.hash = hashPw(b.password, salt); for (const [k, s] of Object.entries(db.sessions)) if (s.user === name && k !== me.tokenHash) delete db.sessions[k]; saveSessions(); }
+      if (b.password) { if (String(b.password).length < 8) return err(res, 400, "Password must be at least 8 characters"); const salt = crypto.randomBytes(16).toString("hex"); u.salt = salt; u.hash = hashPw(b.password, salt); for (const [k, s] of Object.entries(db.sessions)) if (s.user === name && k !== me.tokenHash) delete db.sessions[k]; saveSessions(); }
       if (typeof b.admin === "boolean" && name !== me.name) u.admin = b.admin;
       if (typeof b.upload === "boolean") u.upload = b.upload;
       saveUsers(); return send(res, 200, { user: publicUser(name, u) });
@@ -358,6 +395,7 @@ const server = http.createServer(async (req, res) => {
 server.listen(PORT, () => {
   log(`Pulsewave Server ${VERSION} "${SERVER_NAME}" on port ${PORT}`);
   log(`music: ${MUSIC_DIR}  data: ${DATA_DIR}  uploads: ${UPLOAD_DIR}`);
+  if (PUBLIC_URL) log(`public address: ${PUBLIC_URL}${TRUST_PROXY ? " (behind a proxy/tunnel)" : ""}`);
   if (!Object.keys(db.users).length) log("No accounts yet: open the server in a browser to create the admin account.");
   scan().catch(e => log("scan failed", e.message));
   setInterval(() => scan().catch(() => {}), RESCAN_HOURS * 3600e3);

@@ -192,14 +192,18 @@ const Srv = (() => {
     return data;
   }
   const tok = () => encodeURIComponent(cfg.token);
-  const stream = s => `${clean(cfg.url)}/api/stream/${s.id}?t=${tok()}`;
-  const art = s => `${clean(cfg.url)}/api/art/${s.id}?t=${tok()}`;
+  let guestInfo = null, shares = {};
+  const stream = s => s.share ? `${s.shareUrl}/api/stream/${s.id}?s=${s.share}` : `${clean(cfg.url)}/api/stream/${s.id}?t=${tok()}`;
+  const art = s => s.share ? `${s.shareUrl}/api/art/${s.id}?s=${s.share}` : `${clean(cfg.url)}/api/art/${s.id}?t=${tok()}`;
+  const mapSong = (r, favs, plays) => ({ id: r.id, remote: true, title: r.title, artist: r.artist, album: r.album, duration: r.duration, year: r.year, genre: r.genre,
+    fname: r.fname, size: r.size, added: r.added, art: r.hasArt ? "remote" : null, hasLrc: r.hasLrc, fav: favs.has(r.id), plays: plays[r.id] || 0 });
 
   async function loadLibrary() {
     const [lib, ud] = await Promise.all([call("library"), call("userdata")]);
     const favs = new Set(ud.favs || []), plays = ud.plays || {};
-    songs = lib.songs.map(r => ({ id: r.id, remote: true, title: r.title, artist: r.artist, album: r.album, duration: r.duration, year: r.year, genre: r.genre,
-      fname: r.fname, size: r.size, added: r.added, art: r.hasArt ? "remote" : null, hasLrc: r.hasLrc, fav: favs.has(r.id), plays: plays[r.id] || 0 }));
+    songs = lib.songs.map(r => mapSong(r, favs, plays));
+    try { info = await call("info"); cfg.name = info.name; } catch {}
+    try { shares = Object.fromEntries((await call("shares")).shares.map(x => [x.playlistId, x.id])); } catch { shares = {}; }
     folders = ud.folders || [];
     playlists = [...(ud.playlists || []).filter(p => !p.ro),
       ...(ud.family || []).map(p => ({ ...p, id: "fam:" + p.owner + ":" + p.id, ro: true, shared: false, folderId: undefined }))];
@@ -208,18 +212,61 @@ const Srv = (() => {
     return lib;
   }
   async function reload() { await loadLibrary(); render(); }
-  function saveUser() {
-    if (!on()) return;
+  async function pushUser() {
     clearTimeout(saveT);
-    saveT = setTimeout(async () => {
-      try {
-        await call("userdata", { method: "PUT", json: { favs: songs.filter(s => s.fav).map(s => s.id),
-          plays: Object.fromEntries(songs.filter(s => s.plays).map(s => [s.id, s.plays])), playlists: playlists.filter(p => !p.ro), folders } });
-      } catch (e) { toast("Couldn't save to the family server: " + e.message); }
-    }, 700);
+    try {
+      await call("userdata", { method: "PUT", json: { favs: songs.filter(s => s.fav).map(s => s.id),
+        plays: Object.fromEntries(songs.filter(s => s.plays).map(s => [s.id, s.plays])), playlists: playlists.filter(p => !p.ro), folders } });
+    } catch (e) { toast("Couldn't save to the family server: " + e.message); }
+  }
+  function saveUser() { if (!on()) return; clearTimeout(saveT); saveT = setTimeout(pushUser, 700); }
+
+  /* --- listen links: play a shared playlist on the website without an account --- */
+  async function guest(id, url) {
+    try {
+      const r = await fetch(clean(url) + "/api/s/" + encodeURIComponent(id)), d = await r.json();
+      if (!r.ok) { toast(d.error || "This listen link doesn't work any more"); return false; }
+      guestInfo = { id, url: clean(url), name: d.name, owner: d.owner, server: d.server };
+      songs = d.songs.map(x => ({ ...mapSong(x, new Set(), {}), share: id, shareUrl: clean(url) }));
+      folders = [];
+      playlists = [{ id: "share:" + id, name: d.name, owner: d.owner, ro: true, guest: true, songIds: songs.map(s => s.id), created: 0 }];
+      view = { type: "playlist", id: "share:" + id };
+      return true;
+    } catch { toast("Couldn't reach the music server for this link"); return false; }
+  }
+  const siteBase = () => C.site || "https://pulsewave.ryanbarnal.com/";
+  function linkFor(id) {
+    const pub = clean((info && info.publicUrl) || cfg.url);
+    return siteBase() + "?" + (clean(C.familyServer || "") === pub ? "" : "server=" + encodeURIComponent(pub) + "&") + "listen=" + id;
+  }
+  async function listenLink(p) {
+    try {
+      await pushUser();
+      let id = shares[p.id];
+      if (!id) { id = (await call("shares", { method: "POST", json: { playlistId: p.id } })).id; shares[p.id] = id; render(); }
+      const link = linkFor(id);
+      try { await navigator.clipboard.writeText(link); } catch {}
+      const local = /^http:/.test(clean((info && info.publicUrl) || cfg.url));
+      await ask("🔗 Listen link copied", link, "Done", local
+        ? "Note: your server doesn't have a public https address yet, so this link only works at home. See the Family Server guide."
+        : "Anyone with this link can play this playlist on the Pulsewave website. No account needed. Send it by message or email. Turn it off any time from the ⋯ menu.");
+    } catch (e) { toast(e.message); }
+  }
+  async function stopLink(p) {
+    const id = shares[p.id]; if (!id) return;
+    try { await call("shares/" + id, { method: "DELETE" }); delete shares[p.id]; toast("Listen link turned off"); render(); } catch (e) { toast(e.message); }
+  }
+  function banner() {
+    if (guestInfo) return `<div class="guest-banner">🎧 <span><b>${esc(guestInfo.name)}</b> · shared by ${esc(guestInfo.owner)} from ${esc(guestInfo.server)}</span>
+      <button class="btn" data-act="srv-signin">Sign in</button><button class="btn" data-act="guest-exit">My library</button></div>`;
+    if (cfg && cfg.url && !cfg.token && cfg.use !== false) return `<button class="signin-card" data-act="srv-signin"><span class="big">🏠</span><span><b>Sign in to ${esc(cfg.name || "the family server")}</b><small>Family member? Sign in to hear the family's music and your playlists.</small></span><span class="chev">›</span></button>`;
+    return "";
   }
   async function putLyrics(s) { try { await call("lyrics/" + s.id, { method: "PUT", body: s.lrc || "" }); s.hasLrc = !!s.lrc; } catch (e) { toast("Couldn't save lyrics to the server: " + e.message); } }
-  async function lyrics(s) { return call("lyrics/" + s.id); }
+  async function lyrics(s) {
+    if (s.share) { const r = await fetch(`${s.shareUrl}/api/lyrics/${s.id}?s=${s.share}`); if (!r.ok) throw new Error("none"); return r.text(); }
+    return call("lyrics/" + s.id);
+  }
   async function upload(files, folder) {
     if (!cfg.user || (!cfg.user.upload && !cfg.user.admin)) { toast("Ask the admin for permission to add music to the family library"); return []; }
     files = [...files];
@@ -264,9 +311,18 @@ const Srv = (() => {
         }
       } catch {}
     }
+    const qp = new URLSearchParams(location.search), qServer = qp.get("server"), listen = qp.get("listen");
+    if (qServer || listen) history.replaceState(null, "", location.pathname);
+    if (qServer && /^https?:\/\//.test(qServer) && (!cfg || clean(cfg.url) !== clean(qServer))) { cfg = { url: clean(qServer), token: null, use: true }; store.set("server", cfg); }
+    if (!cfg && C.familyServer) cfg = { url: clean(C.familyServer), token: null, use: true };   // the website knows the family server
+    if (listen && cfg && await guest(listen, cfg.url)) { badge(); return true; }
     badge();
     if (!cfg || cfg.use === false) return false;
-    if (!cfg.token) { if (cfg.same) setTimeout(open, 50); return false; }
+    if (!cfg.token) {
+      if (cfg.same || qServer) setTimeout(open, 50);
+      else call("info", {}, { url: cfg.url }).then(i => { cfg.name = i.name; render(); }).catch(() => {});
+      return false;
+    }
     try { await loadLibrary(); badge(); return true; }
     catch (e) { if (cfg.token) toast("The family server can't be reached right now, so you're seeing this device's library."); return false; }
   }
@@ -378,7 +434,7 @@ const Srv = (() => {
   $("#srvClose").onclick = close;
   $("#srvModal").onclick = e => { if (e.target.id === "srvModal") close(); };
 
-  return { boot, on, stream, art, saveUser, putLyrics, lyrics, upload, removeSong, reload, open, user: () => cfg && cfg.user, name: () => cfg && cfg.name };
+  return { boot, on, stream, art, saveUser, banner, listenLink, stopLink, hasLink: p => !!shares[p.id], isGuest: () => !!guestInfo, putLyrics, lyrics, upload, removeSong, reload, open, user: () => cfg && cfg.user, name: () => cfg && cfg.name };
 })();
 
 /* ---------- Library, playlists & queue (saved on this device) ---------- */
@@ -411,6 +467,7 @@ const DB = (() => {
 // keep = true when applying a change that came from another device (don't re-stamp it)
 const syncChanged = () => { if (window.__pwSync) window.__pwSync.changed(); };
 const saveSong = (s, keep) => {
+  if (s.share) return Promise.resolve();
   if (s.remote) { if (s.lrc != null && s.lrc !== s._lrcSent) { s._lrcSent = s.lrc; Srv.putLyrics(s); } Srv.saveUser(); return Promise.resolve(); }
   const { url, artUrl, ...rec } = s; if (!keep) syncChanged(); return DB.put("songs", rec);
 };
@@ -699,7 +756,7 @@ function cover(list, p, big) {
   const h = hueOf(p.id || p.name);
   return `<div class="${cls} blank" style="background:linear-gradient(135deg,hsl(${h},70%,45%),hsl(${(h + 50) % 360},80%,30%))">${p.icon || "♪"}</div>`;
 }
-const card = (p, act, extra = "") => { const l = listOf(p); return `<button class="card" data-act="${act}" data-id="${esc(p.id)}">${cover(l, p)}<div class="cn">${esc(p.name)}</div><div class="cs">${extra || (p.ro ? "👪 " + esc(p.owner) + " · " : p.shared ? "👪 Shared · " : "") + plural(l.length, "song")}</div></button>`; };
+const card = (p, act, extra = "") => { const l = listOf(p); return `<button class="card" data-act="${act}" data-id="${esc(p.id)}">${cover(l, p)}<div class="cn">${esc(p.name)}</div><div class="cs">${extra || (p.ro ? "👪 " + esc(p.owner) + " · " : (p.shared ? "👪 Shared · " : "") + (Srv.hasLink(p) ? "🔗 " : "")) + plural(l.length, "song")}</div></button>`; };
 const head = (title, list, extra = "") => `<div class="pl-btns-row"><span class="muted">${plural(list.length, "song")}${list.length ? ", " + mins(list.reduce((a, s) => a + (s.duration || 0), 0)) : ""}</span>
   ${list.length ? `<button class="btn primary" data-act="play-all">▶ Play</button><button class="btn" data-act="shuffle-all">🔀 Shuffle</button>` : ""}${extra}</div>`;
 function songsHtml(list, c = {}) {
@@ -737,7 +794,7 @@ function render() {
   const back = (to, label) => `<button class="back" data-act="go" data-to="${to}">‹ ${label}</button>`;
   const q = query.toLowerCase(), match = s => !q || (s.title + " " + s.artist + " " + s.album).toLowerCase().includes(q);
 
-  if (!songs.length && t !== "queue" && !query) {
+  if (!songs.length && t !== "queue" && !query && !Srv.isGuest()) {
     h = `<div class="lib-empty"><div class="big-ico">🎵</div><h3>Your library is empty</h3><p class="muted">Add songs from your device. They stay saved here for next time.</p><button class="btn primary" data-act="add-music">＋ Add music</button></div>`;
   } else if (query && t !== "pick") {
     const pls = [...SMART, ...playlists].filter(p => p.name.toLowerCase().includes(q));
@@ -763,7 +820,7 @@ function render() {
     curList = listOf(p);
     const pf = p.folderId && getFolder(p.folderId);
     h = (pf ? `<button class="back" data-act="open-folder" data-id="${esc(pf.id)}">‹ ${esc(pf.name)}</button>` : back("playlists", "Playlists")) + `<div class="pl-head">${cover(curList, p, true)}<div class="pl-info"><h2>${esc(p.name)}</h2>
-      ${p.ro ? `<p class="muted">👪 Shared by ${esc(p.owner)}</p><div class="pl-tools"><button class="btn" data-act="pl-copy">Copy to my playlists</button></div>` : p.smart ? "" : `<div class="pl-tools"><button class="btn" data-act="add-songs">＋ Add songs</button><button class="btn icon" data-act="pl-more" title="More">⋯</button></div>`}</div></div>` +
+      ${p.ro ? `<p class="muted">👪 Shared by ${esc(p.owner)}</p>${p.guest ? "" : `<div class="pl-tools"><button class="btn" data-act="pl-copy">Copy to my playlists</button></div>`}` : p.smart ? "" : `<div class="pl-tools"><button class="btn" data-act="add-songs">＋ Add songs</button><button class="btn icon" data-act="pl-more" title="More">⋯</button></div>`}</div></div>` +
       head(p.name, curList) + (curList.length ? songsHtml(curList, { pl: p }) :
       `<p class="muted pad">${p.smart ? (p.id === "_fav" ? "Tap ♡ on any song to add it here." : "Songs you add will show up here.") : "This playlist is empty. Tap <b>＋ Add songs</b> to choose music."}</p>`);
   } else if (t === "pick") {
@@ -794,6 +851,7 @@ function render() {
     h = `<div class="pl-btns-row"><span class="muted">${tracks.length ? `Playing ${cur + 1} of ${tracks.length}` : "Nothing queued"}</span>${tracks.length > 1 ? '<button class="btn" data-act="clear-queue">Clear upcoming</button>' : ""}</div>` +
       (tracks.length ? songsHtml(tracks, { queue: true }) : `<p class="muted pad">Play a playlist, album or song and it shows up here. Use <b>⋯ → Play next</b> or <b>Add to queue</b> to line up more.</p>`);
   }
+  if (t !== "pick") h = Srv.banner() + h;
   if (Srv.on() && t !== "pick") h = `<div class="src-badge">🏠 <b>${esc(Srv.name() || "Family server")}</b> · ${esc((Srv.user() || {}).name || "")}</div>` + h;
   V.innerHTML = h;
   const so = $("#libSort"); if (so) { so.value = store.get("sort", "title"); so.onchange = () => { store.set("sort", so.value); render(); }; }
@@ -824,10 +882,14 @@ V.addEventListener("click", e => {
   else if (act === "shuffle-all") playList(curList, 0, true);
   else if (act === "add-songs" && p) go({ type: "pick", id: p.id });
   else if (act === "add-music") $("#fileInput").click();
+  else if (act === "srv-signin") Srv.open();
+  else if (act === "guest-exit") location.href = location.pathname;
   else if (act === "pl-copy" && p) { const np = { id: uid(), name: p.name, songIds: [...p.songIds], created: Date.now() }; playlists.push(np); savePl(np); toast(`Copied “${p.name}” to your playlists`); go({ type: "playlist", id: np.id }); }
   else if (act === "import-folder") $("#folderInput").click();
   else if (act === "clear-queue") { tracks = cur >= 0 ? [tracks[cur]] : []; cur = tracks.length ? 0 : -1; render(); }
-  else if (act === "pl-more" && p) { e.stopPropagation(); menu(a, [{ label: "＋ Add songs", fn: () => go({ type: "pick", id: p.id }) }, { label: "✎  Rename", fn: () => renamePl(p) }, { label: "📁 Move to folder…", fn: () => folderMenu(a, p) }, Srv.on() && { label: p.shared ? "👪 Stop sharing with family" : "👪 Share with family", fn: () => { p.shared = !p.shared; savePl(p); toast(p.shared ? "Your family can now see and play this playlist" : "This playlist is private again"); render(); } }, "-", { label: "Delete playlist", danger: true, fn: () => deletePl(p) }]); }
+  else if (act === "pl-more" && p) { e.stopPropagation(); menu(a, [{ label: "＋ Add songs", fn: () => go({ type: "pick", id: p.id }) }, { label: "✎  Rename", fn: () => renamePl(p) }, { label: "📁 Move to folder…", fn: () => folderMenu(a, p) }, Srv.on() && { label: Srv.hasLink(p) ? "🔗 Copy listen link" : "🔗 Make a listen link (no account needed)", fn: () => Srv.listenLink(p) },
+      Srv.on() && Srv.hasLink(p) && { label: "🔗 Turn off listen link", fn: () => Srv.stopLink(p) },
+      Srv.on() && { label: p.shared ? "👪 Stop sharing with family" : "👪 Share with family", fn: () => { p.shared = !p.shared; savePl(p); toast(p.shared ? "Your family can now see and play this playlist" : "This playlist is private again"); render(); } }, "-", { label: "Delete playlist", danger: true, fn: () => deletePl(p) }]); }
 });
 // Drag songs to reorder a playlist
 let dragI = -1;

@@ -45,14 +45,30 @@ footer{text-align:center;color:var(--muted);padding:20px 16px 40px}footer strong
     container_name: pulsewave
     restart: unless-stopped
     ports:
-      - "8095:8095"
+      - "8095:8095"            # at home: http://NAS-IP:8095
     environment:
       SERVER_NAME: "Barnal Family Music"
+      PUBLIC_URL: "https://media.ryanbarnal.com"
+      TRUST_PROXY: "1"         # visitors arrive through Cloudflare; use their real address for lock-outs
       RESCAN_HOURS: "6"
     volumes:
+      # your music folder (Pulsewave never deletes or changes your files;
+      # songs the family adds go into a "Pulsewave Uploads" folder inside it)
       - /share/Multimedia/Music:/music
-      - /share/Container/pulsewave:/data</code></pre>
-<p>If your music is elsewhere, change <code>/share/Multimedia/Music</code> to its path. Change <code>SERVER_NAME</code> to whatever you like. Click <b>Create</b>. The NAS downloads Pulsewave Server and starts it. The first scan of a big music collection can take several minutes.</p>
+      # accounts, playlists, favorites, listen links, lyrics and cover-art cache
+      - /share/Container/pulsewave:/data
+
+  # Publishes the server securely at https://media.ryanbarnal.com, with no router changes
+  tunnel:
+    image: cloudflare/cloudflared:2024.12.2
+    container_name: pulsewave-tunnel
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run
+    environment:
+      TUNNEL_TOKEN: "PASTE-YOUR-CLOUDFLARE-TUNNEL-TOKEN-HERE"
+    depends_on:
+      - pulsewave</code></pre>
+<p>If your music is elsewhere, change <code>/share/Multimedia/Music</code> to its path. Change <code>SERVER_NAME</code> to whatever you like. Leave <code>TUNNEL_TOKEN</code> as it is for now. You'll paste it in step 7. (Until then the <code>pulsewave-tunnel</code> app will show as stopped or restarting, and that's expected.) Click <b>Create</b>. The NAS downloads Pulsewave Server and starts it. The first scan of a big music collection can take several minutes.</p>
 
 <h3><span class="step">4</span>Create your admin account</h3>
 <p>On a computer at home, open <code>http://<i>NAS-IP</i>:8095</code>, for example <code>http://192.168.1.20:8095</code>. You'll find the NAS IP in Qfinder or on the QTS desktop under <b>Control Panel → Network &amp; Virtual Switch</b>. Pulsewave opens and asks you to <b>create the admin account</b>. That's you.</p>
@@ -62,8 +78,36 @@ footer{text-align:center;color:var(--muted);padding:20px 16px 40px}footer strong
 <p>Tap <b>🏠</b> at the top → <b>Add a person</b>. Give each person a name and a starting password. Tick <b>Can add music</b> for anyone you trust to upload songs. Send each person the address, their name and their password. They can change the password themselves under 🏠.</p>
 </section>
 
-<section><h2>Listening outside the home: Tailscale (free, private)</h2>
-<p>At home, everyone uses <code>http://<i>NAS-IP</i>:8095</code>. To listen <b>anywhere</b> without opening your router to the internet, use <b>Tailscale</b>. It's a free private network: only devices you invite can reach the NAS.</p>
+<section><h2>Your public address: media.ryanbarnal.com (Cloudflare Tunnel)</h2>
+<p>This lets the family use Pulsewave from <b>anywhere</b>, right on <b>pulsewave.ryanbarnal.com</b>, with nothing to install and no router changes. Cloudflare securely connects <code>https://media.ryanbarnal.com</code> to your NAS.</p>
+
+<h3><span class="step">6</span>Create the tunnel in Cloudflare</h3>
+<ol>
+<li>Sign in at <a href="https://dash.cloudflare.com">dash.cloudflare.com</a> and open <b>Zero Trust</b> in the left menu. The first time, pick a team name and the <b>Free</b> plan. It may ask for a card, but the Free plan costs nothing.</li>
+<li>Go to <b>Networks → Tunnels → Create a tunnel</b> → choose <b>Cloudflared</b> → name it <code>pulsewave</code> → <b>Save</b>.</li>
+<li>On "Install and run a connector", choose <b>Docker</b>. You'll see a command ending in <code>--token eyJh…</code>. Copy <b>only the long token</b> after <code>--token</code>.</li>
+<li>Click <b>Next</b>, then add a <b>Public hostname</b>:<br>
+Subdomain <code>media</code> · Domain <code>ryanbarnal.com</code> · Type <code>HTTP</code> · URL <code>pulsewave:8095</code> → <b>Save tunnel</b>. Cloudflare creates the DNS record for you.</li>
+</ol>
+
+<h3><span class="step">7</span>Paste the token on the NAS</h3>
+<p>In <b>Container Station → Applications → pulsewave</b>, edit the YAML. Replace <code>PASTE-YOUR-CLOUDFLARE-TUNNEL-TOKEN-HERE</code> with your token, keeping the quotes, then save and recreate the app. Within a minute the tunnel shows <b>Healthy</b> in Cloudflare.</p>
+
+<h3><span class="step">8</span>Try it</h3>
+<p>On your phone with Wi-Fi off, open <a href="https://media.ryanbarnal.com">https://media.ryanbarnal.com</a>. Pulsewave should open. Then open <a href="https://pulsewave.ryanbarnal.com">pulsewave.ryanbarnal.com</a>. The Library shows <b>Sign in to Barnal Family Music</b>.</p>
+
+<div class="note"><b>Keep the token secret.</b> Anyone with it could run your tunnel. If it leaks, delete the tunnel in Cloudflare and make a new one.</div>
+</section>
+
+<section><h2>How your family listens</h2>
+<h3>With an account (full experience)</h3>
+<p>They open <b>pulsewave.ryanbarnal.com</b> → <b>Sign in to Barnal Family Music</b> → enter the name and password you gave them. They get the whole family library, their own favorites and playlists, playlists others shared, lyrics and karaoke. On a phone, use <b>Add to Home Screen</b> so it opens like an app.</p>
+<h3>With a listen link (no account)</h3>
+<p>Open any of your playlists → <b>⋯ → Make a listen link</b>. The link is copied, ready to paste into Messenger, Viber, WhatsApp or email. Anyone who opens it can play <b>that playlist only</b> on pulsewave.ryanbarnal.com, with lyrics and visuals, without signing in. The link always plays your latest version of the playlist. Use <b>⋯ → Turn off listen link</b> to stop it at any time.</p>
+</section>
+
+<section><h2>Optional: private access with Tailscale instead</h2>
+<p>If you'd rather <b>not</b> have a public address, skip the Cloudflare steps and use Tailscale. It's a free private network: only devices you invite can reach the NAS, but each family member must install the Tailscale app, and listen links won't work for people outside it.</p>
 <ol>
 <li>On the NAS: <b>App Center</b> → search <b>Tailscale</b> → <b>Install</b> → open it and sign in (Google, Microsoft or Apple account).</li>
 <li>At <a href="https://login.tailscale.com/admin/machines">login.tailscale.com/admin/machines</a>, find the NAS. Note its name, for example <code>ts-264</code>, or its <code>100.x.y.z</code> address.</li>
@@ -71,7 +115,6 @@ footer{text-align:center;color:var(--muted);padding:20px 16px 40px}footer strong
 <li>Each family member installs the <b>Tailscale</b> app (iPhone, Android, Windows or Mac), signs in, accepts the invite, and leaves Tailscale switched on.</li>
 <li>Everyone then opens <code>http://ts-264:8095</code> (or <code>http://100.x.y.z:8095</code>) from anywhere: home Wi-Fi, mobile data or travel.</li>
 </ol>
-<div class="note"><b>Prefer a public link instead</b>, like <code>https://music.ryanbarnal.com</code>, with no Tailscale app for family? That's possible with a free Cloudflare Tunnel. Your login page is then on the open internet, protected by passwords and lock-out after 10 wrong tries. Ask and it can be added.</div>
 </section>
 
 <section><h2>Using it on phones, tablets and computers</h2>
@@ -83,7 +126,7 @@ footer{text-align:center;color:var(--muted);padding:20px 16px 40px}footer strong
 <tr><td>Pulsewave desktop app</td><td>Tap <b>🏠</b> → enter the server address → sign in.</td></tr>
 </table>
 <p>In 🏠 you can switch between the <b>family library</b> and the device's <b>own library</b> at any time. Device-only songs aren't affected.</p>
-<div class="note">The pulsewave.ryanbarnal.com website can't connect to the home server directly, because browsers block plain <code>http://</code> servers on secure <code>https://</code> pages. Open the server's own address instead. It has the full Pulsewave app built in.</div>
+<div class="note">With the Cloudflare address set up, <b>pulsewave.ryanbarnal.com</b> connects to your server directly. Without it (home-only or Tailscale), open the server's own address instead. Browsers block plain <code>http://</code> servers on secure <code>https://</code> pages, but the server has the full Pulsewave app built in.</div>
 </section>
 
 <section><h2>Looking after it</h2>
@@ -101,7 +144,11 @@ footer{text-align:center;color:var(--muted);padding:20px 16px 40px}footer strong
 <li>Passwords are stored as secure hashes (scrypt), never in plain text. Sign-ins last 180 days per device.</li>
 <li>After 10 wrong passwords, that address is locked out for 15 minutes.</li>
 <li>Pulsewave Server never changes or deletes files in your music folder. It only adds new uploads.</li>
-<li>With Tailscale, the server isn't reachable from the public internet at all.</li>
+<li>Through Cloudflare, every connection is encrypted (https). Your home IP address stays hidden and no router ports are opened.</li>
+<li>Because the sign-in page is on the internet, give everyone a <b>password of at least 8 characters</b> that they don't use anywhere else. Pulsewave requires 8 or more.</li>
+<li>Listen links are long random codes that can't be guessed. They only open the one playlist, never your whole library, and you can turn them off at any time.</li>
+<li>Cloudflare's free plan is meant for normal family use like this. Streaming music to your family is fine. Very heavy use, such as sharing video publicly, isn't what it's for.</li>
+<li>With Tailscale instead, the server isn't reachable from the public internet at all.</li>
 </ul></section>
 </main>
 <footer>Pulsewave Family Server · Created by <strong>Ryan Ocbina Barnal</strong> · <a href="help.html">Pulsewave manual</a></footer>
