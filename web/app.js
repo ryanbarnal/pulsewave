@@ -104,6 +104,7 @@ requestAnimationFrame(introLoop);
 
 /* ---------- Audio graph ---------- */
 const audio = new Audio();
+audio.crossOrigin = "anonymous";   // lets the visualizer/equalizer work on songs streamed from the family server
 audio.preload = "metadata";
 let ctx, analyser, filters = [], bass, pan, master, freq, wave, kNodes = null, karaoke = store.get("karaoke", false);
 // Voice detector: energy in the voice band (250–3500 Hz) that sits in the centre of the stereo mix
@@ -173,6 +174,213 @@ function initAudio() {
   applyEq(); bass.gain.value = +$("#bassBoost").value; setBalance();
 }
 
+/* ---------- Family media server (Pulsewave Server on the NAS) ---------- */
+const Srv = (() => {
+  let cfg = store.get("server", null);       // { url, token, user, use, name, same }
+  let saveT = 0, info = null, adminUsers = [];
+  const on = () => !!(cfg && cfg.token && cfg.use !== false && libFromServer);
+  let libFromServer = false;
+  const clean = u => String(u || "").trim().replace(/\/+$/, "").replace(/\/index\.html$/, "");
+  async function call(q, opts = {}, c = cfg) {
+    const headers = { ...(opts.headers || {}) };
+    if (c && c.token) headers.Authorization = "Bearer " + c.token;
+    let body = opts.body; if (opts.json) { headers["Content-Type"] = "application/json"; body = JSON.stringify(opts.json); }
+    const r = await fetch(clean(c.url) + "/api/" + q, { method: opts.method || "GET", headers, body });
+    const data = (r.headers.get("content-type") || "").includes("json") ? await r.json() : await r.text();
+    if (r.status === 401 && c === cfg && cfg.token && !/^(login|setup)/.test(q)) { cfg.token = null; store.set("server", cfg); toast("Please sign in to the family server again"); open(); }
+    if (!r.ok) throw new Error((data && data.error) || r.statusText || "Request failed");
+    return data;
+  }
+  const tok = () => encodeURIComponent(cfg.token);
+  const stream = s => `${clean(cfg.url)}/api/stream/${s.id}?t=${tok()}`;
+  const art = s => `${clean(cfg.url)}/api/art/${s.id}?t=${tok()}`;
+
+  async function loadLibrary() {
+    const [lib, ud] = await Promise.all([call("library"), call("userdata")]);
+    const favs = new Set(ud.favs || []), plays = ud.plays || {};
+    songs = lib.songs.map(r => ({ id: r.id, remote: true, title: r.title, artist: r.artist, album: r.album, duration: r.duration, year: r.year, genre: r.genre,
+      fname: r.fname, size: r.size, added: r.added, art: r.hasArt ? "remote" : null, hasLrc: r.hasLrc, fav: favs.has(r.id), plays: plays[r.id] || 0 }));
+    folders = ud.folders || [];
+    playlists = [...(ud.playlists || []).filter(p => !p.ro),
+      ...(ud.family || []).map(p => ({ ...p, id: "fam:" + p.owner + ":" + p.id, ro: true, shared: false, folderId: undefined }))];
+    tracks = tracks.map(t => songs.find(s => s.id === t.id) || t);
+    libFromServer = true;
+    return lib;
+  }
+  async function reload() { await loadLibrary(); render(); }
+  function saveUser() {
+    if (!on()) return;
+    clearTimeout(saveT);
+    saveT = setTimeout(async () => {
+      try {
+        await call("userdata", { method: "PUT", json: { favs: songs.filter(s => s.fav).map(s => s.id),
+          plays: Object.fromEntries(songs.filter(s => s.plays).map(s => [s.id, s.plays])), playlists: playlists.filter(p => !p.ro), folders } });
+      } catch (e) { toast("Couldn't save to the family server: " + e.message); }
+    }, 700);
+  }
+  async function putLyrics(s) { try { await call("lyrics/" + s.id, { method: "PUT", body: s.lrc || "" }); s.hasLrc = !!s.lrc; } catch (e) { toast("Couldn't save lyrics to the server: " + e.message); } }
+  async function lyrics(s) { return call("lyrics/" + s.id); }
+  async function upload(files, folder) {
+    if (!cfg.user || (!cfg.user.upload && !cfg.user.admin)) { toast("Ask the admin for permission to add music to the family library"); return []; }
+    files = [...files];
+    const base = n => n.replace(/\.[^.]+$/, "").toLowerCase();
+    const lrcs = files.filter(f => /\.lrc$/i.test(f.name));
+    const list = files.filter(f => /\.(mp3|m4a|aac|flac|ogg|oga|opus|wav|webm|aiff?|alac)$/i.test(f.name));
+    const ids = [];
+    for (const [i, f] of list.entries()) {
+      toast(`Uploading ${i + 1} of ${list.length}: ${f.name}`);
+      try {
+        const r = await call(`upload?name=${encodeURIComponent(f.name)}&folder=${encodeURIComponent(folder || "")}`, { method: "PUT", body: f });
+        ids.push(r.id);
+        const l = lrcs.find(x => base(x.name) === base(f.name));
+        if (l) await call("lyrics/" + r.id, { method: "PUT", body: await l.text() }).catch(() => {});
+      } catch (e) { toast(`${f.name}: ${e.message}`); }
+    }
+    if (!ids.length) return [];
+    toast("Updating the family library…");
+    await call("rescan?wait=1", { method: "POST" });
+    await reload();
+    toast(`Added ${plural(ids.length, "song")} to the family library`);
+    return ids.map(id => songs.find(s => s.id === id)).filter(Boolean);
+  }
+  async function removeSong(s) {
+    if (!cfg.user || !cfg.user.admin) { toast("Only the admin can remove songs from the family library"); return false; }
+    if (!await ask("Remove from the family library?", null, "Delete", `“${s.title}” will be hidden for everyone. The file itself stays on the NAS.`)) return false;
+    await call("songs/" + s.id, { method: "DELETE" }); return true;
+  }
+
+  /* --- startup --- */
+  async function boot() {
+    if (location.protocol.startsWith("http")) {            // opened from the server itself? use it automatically
+      try {
+        const r = await fetch("api/info", { cache: "no-store" });
+        if (r.ok && (r.headers.get("content-type") || "").includes("json")) {
+          info = await r.json();
+          if (info.pulsewaveServer) {
+            const here = clean(location.origin + location.pathname.replace(/[^/]*$/, ""));
+            if (!cfg || clean(cfg.url) !== here) { cfg = { url: here, token: null, use: true, same: true }; store.set("server", cfg); }
+            cfg.name = info.name; cfg.same = true;
+          }
+        }
+      } catch {}
+    }
+    badge();
+    if (!cfg || cfg.use === false) return false;
+    if (!cfg.token) { if (cfg.same) setTimeout(open, 50); return false; }
+    try { await loadLibrary(); badge(); return true; }
+    catch (e) { if (cfg.token) toast("The family server can't be reached right now, so you're seeing this device's library."); return false; }
+  }
+  function badge() { const b = $("#srvBtn"); b.classList.toggle("linked", !!(cfg && cfg.token && cfg.use !== false)); b.title = cfg && cfg.name ? cfg.name : "Family server"; }
+
+  /* --- the Family server window --- */
+  const B = () => $("#srvBody");
+  async function open() {
+    $("#srvModal").classList.remove("hidden");
+    if (!cfg || !cfg.url) return viewAddress();
+    try { info = await call("info", {}, { url: cfg.url }); cfg.name = info.name; store.set("server", cfg); }
+    catch { return viewAddress("Can't reach the server at " + cfg.url + ". Check the address and that the NAS is on."); }
+    if (info.setup) return viewSetup();
+    if (!cfg.token) return viewLogin();
+    return viewAccount();
+  }
+  const close = () => $("#srvModal").classList.add("hidden");
+  function msg(t, bad) { const m = $("#srvMsg"); if (m) { m.textContent = t || ""; m.classList.toggle("bad", !!bad); } }
+  function viewAddress(problem) {
+    const mixed = location.protocol === "https:";
+    B().innerHTML = `<p>Enter the address of your family's Pulsewave Server, for example <code>http://192.168.1.20:8095</code> at home, or the Tailscale name like <code>http://nas:8095</code>.</p>
+      <div class="srv-row"><input id="srvUrl" type="url" placeholder="http://192.168.1.20:8095" value="${esc(cfg && cfg.url || "")}"><button class="btn primary" id="srvGo">Connect</button></div>
+      ${mixed ? `<p class="muted small">Tip: on this website, browsers block plain <b>http://</b> servers. Open the server's address directly in your browser instead. It has Pulsewave built in.</p>` : ""}
+      <p id="srvMsg" class="srv-msg${problem ? " bad" : ""}">${esc(problem || "")}</p>`;
+    $("#srvGo").onclick = async () => {
+      let u = clean($("#srvUrl").value); if (!u) return;
+      if (!/^https?:\/\//.test(u)) u = "http://" + u;
+      if (mixed && u.startsWith("http:")) { msg("Opening the server directly…"); location.href = u + "/"; return; }
+      msg("Connecting…");
+      try { const i = await call("info", {}, { url: u }); if (!i.pulsewaveServer) throw 0; cfg = { url: u, token: null, use: true, name: i.name }; store.set("server", cfg); open(); }
+      catch { msg("No Pulsewave Server found at that address.", true); }
+    };
+    $("#srvUrl").onkeydown = e => { if (e.key === "Enter") $("#srvGo").click(); };
+  }
+  function viewSetup() {
+    B().innerHTML = `<p><b>Welcome to ${esc(info.name)}!</b> First, create the <b>admin</b> account. That's you. You'll add your family next.</p>
+      <div class="srv-form"><input id="srvName" placeholder="Your name" autocomplete="username"><input id="srvPass" type="password" placeholder="Password (6+ characters)" autocomplete="new-password">
+      <button class="btn primary" id="srvDo">Create admin account</button></div><p id="srvMsg" class="srv-msg"></p>`;
+    $("#srvDo").onclick = async () => {
+      try { const r = await call("setup", { method: "POST", json: { name: $("#srvName").value, password: $("#srvPass").value } }, { url: cfg.url }); signedIn(r); }
+      catch (e) { msg(e.message, true); }
+    };
+  }
+  function viewLogin() {
+    B().innerHTML = `<p>Sign in to <b>${esc(cfg.name || "the family server")}</b>.</p>
+      <div class="srv-form"><input id="srvName" placeholder="Name" autocomplete="username" autocapitalize="none"><input id="srvPass" type="password" placeholder="Password" autocomplete="current-password">
+      <button class="btn primary" id="srvDo">Sign in</button></div><p id="srvMsg" class="srv-msg"></p>
+      ${cfg.same ? "" : `<p class="muted small"><a href="#" id="srvOther">Use a different server</a></p>`}`;
+    const go = async () => { try { const r = await call("login", { method: "POST", json: { name: $("#srvName").value, password: $("#srvPass").value } }, { url: cfg.url }); signedIn(r); } catch (e) { msg(e.message, true); } };
+    $("#srvDo").onclick = go; $("#srvPass").onkeydown = e => { if (e.key === "Enter") go(); };
+    const o = $("#srvOther"); if (o) o.onclick = e => { e.preventDefault(); viewAddress(); };
+    setTimeout(() => $("#srvName").focus(), 30);
+  }
+  async function signedIn(r) {
+    cfg.token = r.token; cfg.user = r.user; cfg.use = true; store.set("server", cfg);
+    try { await loadLibrary(); } catch {}
+    badge(); go({ type: "playlists" }); toast(`Welcome, ${r.user.name}!`);
+    viewAccount();
+  }
+  async function viewAccount() {
+    try { const me = await call("me"); cfg.user = me.user; store.set("server", cfg); } catch { return; }
+    const u = cfg.user;
+    B().innerHTML = `<div class="srv-me"><span class="avatar" style="background:hsl(${hueOf(u.name)},60%,40%)">${esc(u.name[0].toUpperCase())}</span>
+        <span><b>${esc(u.name)}</b><small>${u.admin ? "Admin" : u.upload ? "Family · can add music" : "Family"} · ${esc(cfg.name || "")}</small></span></div>
+      <label class="switch srv-use"><input type="checkbox" id="srvUse"${cfg.use !== false ? " checked" : ""}> Show the <b>family library</b> on this device <small class="muted">(off = this device's own library)</small></label>
+      <div class="srv-actions"><button class="btn" id="srvPw">Change password</button><button class="btn" id="srvOut">Sign out</button>${cfg.same ? "" : `<button class="btn" id="srvForget">Forget server</button>`}</div>
+      <p id="srvMsg" class="srv-msg"></p>
+      ${u.admin ? `<h3>Family members</h3><ul class="srv-users" id="srvUsers"><li class="muted">Loading…</li></ul>
+        <div class="srv-add"><b>Add a person</b><div class="srv-form row"><input id="nuName" placeholder="Name" autocomplete="off"><input id="nuPass" type="text" placeholder="Password (6+)" autocomplete="off"></div>
+        <label class="switch"><input type="checkbox" id="nuUp"> Can add music</label> <label class="switch"><input type="checkbox" id="nuAdmin"> Admin</label>
+        <button class="btn primary" id="nuGo">Add</button></div>
+        <h3>Music library</h3><p class="muted" id="srvLib">…</p>
+        <div class="srv-actions"><button class="btn" id="srvScan">Rescan music folder</button><button class="btn" id="srvUnhide">Restore removed songs</button></div>` : ""}`;
+    $("#srvUse").onchange = async e => { cfg.use = e.target.checked; store.set("server", cfg); location.reload(); };
+    $("#srvOut").onclick = async () => { try { await call("logout", { method: "POST" }); } catch {} cfg.token = null; cfg.user = null; store.set("server", cfg); location.reload(); };
+    const f = $("#srvForget"); if (f) f.onclick = () => { store.set("server", null); location.reload(); };
+    $("#srvPw").onclick = async () => {
+      const old = await ask("Current password", "", "Next"); if (!old) return;
+      const nw = await ask("New password (6+ characters)", "", "Save"); if (!nw) return;
+      try { await call("password", { method: "POST", json: { old, password: nw } }); msg("Password changed ✓"); } catch (e) { msg(e.message, true); }
+    };
+    if (!u.admin) return;
+    const loadUsers = async () => {
+      const r = await call("users"); adminUsers = r.users;
+      $("#srvUsers").innerHTML = adminUsers.map(x => `<li data-u="${esc(x.name)}"><span class="avatar" style="background:hsl(${hueOf(x.name)},60%,40%)">${esc(x.name[0].toUpperCase())}</span>
+        <span class="un"><b>${esc(x.name)}</b><small>${x.admin ? "Admin" : "Family"} · ${x.lastSeen ? "last here " + new Date(x.lastSeen).toLocaleDateString() : "hasn't signed in yet"}</small></span>
+        <label class="switch" title="Can add music"><input type="checkbox" data-up${x.upload ? " checked" : ""}${x.admin ? " disabled" : ""}> 🎵＋</label>
+        ${x.name === u.name ? "" : `<button class="btn" data-pw>Reset password</button><button class="btn" data-del title="Remove">✕</button>`}</li>`).join("");
+    };
+    $("#srvUsers").onclick = async e => {
+      const li = e.target.closest("li[data-u]"); if (!li) return; const name = li.dataset.u;
+      try {
+        if (e.target.closest("[data-pw]")) { const pw = await ask(`New password for ${name}`, "", "Save"); if (pw) { await call("users/" + encodeURIComponent(name), { method: "PATCH", json: { password: pw } }); msg(`Password for ${name} changed. Tell them the new one.`); } }
+        if (e.target.closest("[data-del]")) { if (await ask(`Remove ${name}?`, null, "Delete", `${name} won't be able to sign in any more.`)) { await call("users/" + encodeURIComponent(name), { method: "DELETE" }); loadUsers(); } }
+      } catch (er) { msg(er.message, true); }
+    };
+    $("#srvUsers").onchange = async e => { const li = e.target.closest("li[data-u]"); if (li && e.target.matches("[data-up]")) { try { await call("users/" + encodeURIComponent(li.dataset.u), { method: "PATCH", json: { upload: e.target.checked } }); } catch (er) { msg(er.message, true); } } };
+    $("#nuGo").onclick = async () => {
+      try { await call("users", { method: "POST", json: { name: $("#nuName").value, password: $("#nuPass").value, upload: $("#nuUp").checked, admin: $("#nuAdmin").checked } });
+        msg(`Added ${$("#nuName").value.trim()}. Send them the server address, their name and password.`); $("#nuName").value = $("#nuPass").value = ""; loadUsers(); }
+      catch (er) { msg(er.message, true); }
+    };
+    const libInfo = async () => { try { const l = await call("library"); $("#srvLib").textContent = `${plural(l.songs.length, "song")} · last scanned ${l.scannedAt ? new Date(l.scannedAt).toLocaleString() : "never"}${l.scanning ? ` · scanning ${l.progress.done}/${l.progress.total}…` : ""}`; } catch {} };
+    $("#srvScan").onclick = async () => { msg("Scanning the music folder… this can take a while the first time."); try { await call("rescan?wait=1", { method: "POST" }); await reload(); libInfo(); msg("Library updated ✓"); } catch (er) { msg(er.message, true); } };
+    $("#srvUnhide").onclick = async () => { try { await call("hidden", { method: "DELETE" }); await reload(); libInfo(); msg("Removed songs are back ✓"); } catch (er) { msg(er.message, true); } };
+    loadUsers().catch(er => msg(er.message, true)); libInfo();
+  }
+  $("#srvBtn").onclick = open;
+  $("#srvClose").onclick = close;
+  $("#srvModal").onclick = e => { if (e.target.id === "srvModal") close(); };
+
+  return { boot, on, stream, art, saveUser, putLyrics, lyrics, upload, removeSong, reload, open, user: () => cfg && cfg.user, name: () => cfg && cfg.name };
+})();
+
 /* ---------- Library, playlists & queue (saved on this device) ---------- */
 let tracks = [], cur = -1, shuffle = store.get("shuffle", false), repeat = store.get("repeat", "off"); // tracks = the play queue ("Up Next")
 let songs = [], playlists = [], folders = [], view = { type: store.get("libView", "playlists") }, query = "", rowCtx = null, libReady = false;
@@ -202,8 +410,11 @@ const DB = (() => {
 })();
 // keep = true when applying a change that came from another device (don't re-stamp it)
 const syncChanged = () => { if (window.__pwSync) window.__pwSync.changed(); };
-const saveSong = (s, keep) => { const { url, artUrl, ...rec } = s; if (!keep) syncChanged(); return DB.put("songs", rec); };
-const savePl = (p, keep) => { if (!keep) { p.updated = Date.now(); syncChanged(); } return DB.put("playlists", p); };
+const saveSong = (s, keep) => {
+  if (s.remote) { if (s.lrc != null && s.lrc !== s._lrcSent) { s._lrcSent = s.lrc; Srv.putLyrics(s); } Srv.saveUser(); return Promise.resolve(); }
+  const { url, artUrl, ...rec } = s; if (!keep) syncChanged(); return DB.put("songs", rec);
+};
+const savePl = (p, keep) => { if (!keep) { p.updated = Date.now(); syncChanged(); } if (Srv.on()) { Srv.saveUser(); return Promise.resolve(); } return DB.put("playlists", p); };
 const tomb = k => { const t = store.get("tomb", {}); t[k] = Date.now(); store.set("tomb", t); syncChanged(); };
 function removeSongLocal(s) {
   songs = songs.filter(x => x !== s);
@@ -213,11 +424,13 @@ function removeSongLocal(s) {
   DB.del("songs", s.id);
 }
 function removePlLocal(p) {
-  playlists = playlists.filter(x => x !== p); folders = folders.filter(x => x !== p); DB.del("playlists", p.id);
+  playlists = playlists.filter(x => x !== p); folders = folders.filter(x => x !== p);
+  if (Srv.on()) Srv.saveUser(); else DB.del("playlists", p.id);
   if (view.id === p.id) view = { type: "playlists" };
 }
-const srcUrl = s => s.url || (s.url = URL.createObjectURL(s.file));
-const artUrl = s => s && s.art ? (s.artUrl || (s.artUrl = URL.createObjectURL(s.art))) : "logo.svg";
+const srcUrl = s => s.remote ? Srv.stream(s) : s.url || (s.url = URL.createObjectURL(s.file));
+const artUrl = s => s && s.art ? (s.remote ? Srv.art(s) : s.artUrl || (s.artUrl = URL.createObjectURL(s.art))) : "logo.svg";
+const editable = p => !p.smart && !p.ro;
 
 // Title, artist, album and cover art from an MP3's ID3v2 tag
 async function readTags(file) {
@@ -263,7 +476,8 @@ const getDuration = f => new Promise(res => {
   a.preload = "metadata"; a.onloadedmetadata = () => fin(a.duration); a.onerror = () => fin(0); setTimeout(() => fin(0), 6000); a.src = u;
 });
 
-async function addFiles(files, quiet) {
+async function addFiles(files, quiet, folder) {
+  if (Srv.on()) { const up = await Srv.upload(files, folder); if (up.length && !quiet && cur === -1) playList(up, 0); return up; }
   files = [...files];
   const base = n => n.replace(/\.[^.]+$/, "").toLowerCase();
   const lrcs = files.filter(f => /\.(lrc|txt)$/i.test(f.name));
@@ -305,7 +519,7 @@ async function importFolder(files) {
   files.forEach(f => { const d = dirOf(f); if (!groups.has(d)) groups.set(d, []); groups.get(d).push(f); });
   let made = 0;
   for (const [name, fs] of groups) {
-    const added = await addFiles(fs, true);
+    const added = await addFiles(fs, true, name);
     if (!added.length) continue;
     const p = { id: uid(), name, songIds: added.map(s => s.id), created: Date.now(), folderId: view.type === "folder" ? view.id : undefined };
     playlists.push(p); await savePl(p); made++;
@@ -416,6 +630,7 @@ async function deletePl(p) {
   removePlLocal(p); tomb(p.id); go({ type: "playlists" });
 }
 async function deleteSong(s) {
+  if (s.remote) { try { if (await Srv.removeSong(s)) { removeSongLocal(s); render(); } } catch (e) { toast(e.message); } return; }
   if (!await ask("Delete from library?", null, "Delete", `“${s.title}” will be removed from this device and from all playlists.`)) return;
   removeSongLocal(s); tomb(s.size + ":" + s.fname); render();
 }
@@ -457,17 +672,18 @@ function songMenu(btn, s, c) {
     { label: "▶  Play next", fn: () => { if (cur === -1) return playList([s]); tracks.splice(cur + 1, 0, s); toast("Playing next"); render(); } },
     { label: "≡  Add to queue", fn: () => { if (cur === -1) return playList([s]); tracks.push(s); toast("Added to queue"); render(); } },
     { label: "＋ Add to playlist…", fn: () => menu(btn, [{ label: "＋ New playlist…", fn: () => newPlaylist(s).then(render) }, playlists.length && "-",
-        ...playlists.map(p => ({ label: (p.songIds.includes(s.id) ? "✓ " : "") + plLabel(p), fn: () => addToPlaylist(p, s) }))]) },
+        ...playlists.filter(editable).map(p => ({ label: (p.songIds.includes(s.id) ? "✓ " : "") + plLabel(p), fn: () => addToPlaylist(p, s) }))]) },
     { label: s.fav ? "♡  Remove from Favorites" : "♥  Favorite", fn: () => toggleFav(s) },
     s.artist !== "Unknown artist" && { label: "👤 Go to artist", fn: () => go({ type: "artist", name: s.artist }) },
     s.album && { label: "💿 Go to album", fn: () => go({ type: "album", key: albumKey(s) }) }
   ];
-  if (c.pl && !c.pl.smart) items.push("-",
+  if (c.pl && editable(c.pl)) items.push("-",
     c.i > 0 && { label: "↑  Move up", fn: () => movePl(c.pl, c.i, c.i - 1) },
     c.i < c.pl.songIds.length - 1 && { label: "↓  Move down", fn: () => movePl(c.pl, c.i, c.i + 1) },
     { label: "Remove from this playlist", fn: () => { c.pl.songIds.splice(c.i, 1); savePl(c.pl); render(); } });
   if (c.queue) items.push("-", { label: "Remove from Up Next", fn: () => removeFromQueue(c.i) });
-  items.push("-", { label: "Delete from library", danger: true, fn: () => deleteSong(s) });
+  if (!s.remote) items.push("-", { label: "Delete from library", danger: true, fn: () => deleteSong(s) });
+  else if (Srv.user() && Srv.user().admin) items.push("-", { label: "Remove from family library", danger: true, fn: () => deleteSong(s) });
   menu(btn, items);
 }
 
@@ -483,13 +699,13 @@ function cover(list, p, big) {
   const h = hueOf(p.id || p.name);
   return `<div class="${cls} blank" style="background:linear-gradient(135deg,hsl(${h},70%,45%),hsl(${(h + 50) % 360},80%,30%))">${p.icon || "♪"}</div>`;
 }
-const card = (p, act, extra = "") => { const l = listOf(p); return `<button class="card" data-act="${act}" data-id="${esc(p.id)}">${cover(l, p)}<div class="cn">${esc(p.name)}</div><div class="cs">${extra || plural(l.length, "song")}</div></button>`; };
+const card = (p, act, extra = "") => { const l = listOf(p); return `<button class="card" data-act="${act}" data-id="${esc(p.id)}">${cover(l, p)}<div class="cn">${esc(p.name)}</div><div class="cs">${extra || (p.ro ? "👪 " + esc(p.owner) + " · " : p.shared ? "👪 Shared · " : "") + plural(l.length, "song")}</div></button>`; };
 const head = (title, list, extra = "") => `<div class="pl-btns-row"><span class="muted">${plural(list.length, "song")}${list.length ? ", " + mins(list.reduce((a, s) => a + (s.duration || 0), 0)) : ""}</span>
   ${list.length ? `<button class="btn primary" data-act="play-all">▶ Play</button><button class="btn" data-act="shuffle-all">🔀 Shuffle</button>` : ""}${extra}</div>`;
 function songsHtml(list, c = {}) {
   rowCtx = { list, ...c };
   if (!list.length) return "";
-  const now = tracks[cur], drag = c.pl && !c.pl.smart;
+  const now = tracks[cur], drag = c.pl && editable(c.pl);
   return `<ol class="songs">${list.map((s, i) => {
     const playing = c.queue ? i === cur : now === s;
     const picked = c.pick && c.pick.songIds.includes(s.id);
@@ -547,7 +763,7 @@ function render() {
     curList = listOf(p);
     const pf = p.folderId && getFolder(p.folderId);
     h = (pf ? `<button class="back" data-act="open-folder" data-id="${esc(pf.id)}">‹ ${esc(pf.name)}</button>` : back("playlists", "Playlists")) + `<div class="pl-head">${cover(curList, p, true)}<div class="pl-info"><h2>${esc(p.name)}</h2>
-      ${p.smart ? "" : `<div class="pl-tools"><button class="btn" data-act="add-songs">＋ Add songs</button><button class="btn icon" data-act="pl-more" title="More">⋯</button></div>`}</div></div>` +
+      ${p.ro ? `<p class="muted">👪 Shared by ${esc(p.owner)}</p><div class="pl-tools"><button class="btn" data-act="pl-copy">Copy to my playlists</button></div>` : p.smart ? "" : `<div class="pl-tools"><button class="btn" data-act="add-songs">＋ Add songs</button><button class="btn icon" data-act="pl-more" title="More">⋯</button></div>`}</div></div>` +
       head(p.name, curList) + (curList.length ? songsHtml(curList, { pl: p }) :
       `<p class="muted pad">${p.smart ? (p.id === "_fav" ? "Tap ♡ on any song to add it here." : "Songs you add will show up here.") : "This playlist is empty. Tap <b>＋ Add songs</b> to choose music."}</p>`);
   } else if (t === "pick") {
@@ -578,6 +794,7 @@ function render() {
     h = `<div class="pl-btns-row"><span class="muted">${tracks.length ? `Playing ${cur + 1} of ${tracks.length}` : "Nothing queued"}</span>${tracks.length > 1 ? '<button class="btn" data-act="clear-queue">Clear upcoming</button>' : ""}</div>` +
       (tracks.length ? songsHtml(tracks, { queue: true }) : `<p class="muted pad">Play a playlist, album or song and it shows up here. Use <b>⋯ → Play next</b> or <b>Add to queue</b> to line up more.</p>`);
   }
+  if (Srv.on() && t !== "pick") h = `<div class="src-badge">🏠 <b>${esc(Srv.name() || "Family server")}</b> · ${esc((Srv.user() || {}).name || "")}</div>` + h;
   V.innerHTML = h;
   const so = $("#libSort"); if (so) { so.value = store.get("sort", "title"); so.onchange = () => { store.set("sort", so.value); render(); }; }
   LP.scrollTop = sc;
@@ -607,9 +824,10 @@ V.addEventListener("click", e => {
   else if (act === "shuffle-all") playList(curList, 0, true);
   else if (act === "add-songs" && p) go({ type: "pick", id: p.id });
   else if (act === "add-music") $("#fileInput").click();
+  else if (act === "pl-copy" && p) { const np = { id: uid(), name: p.name, songIds: [...p.songIds], created: Date.now() }; playlists.push(np); savePl(np); toast(`Copied “${p.name}” to your playlists`); go({ type: "playlist", id: np.id }); }
   else if (act === "import-folder") $("#folderInput").click();
   else if (act === "clear-queue") { tracks = cur >= 0 ? [tracks[cur]] : []; cur = tracks.length ? 0 : -1; render(); }
-  else if (act === "pl-more" && p) { e.stopPropagation(); menu(a, [{ label: "＋ Add songs", fn: () => go({ type: "pick", id: p.id }) }, { label: "✎  Rename", fn: () => renamePl(p) }, { label: "📁 Move to folder…", fn: () => folderMenu(a, p) }, "-", { label: "Delete playlist", danger: true, fn: () => deletePl(p) }]); }
+  else if (act === "pl-more" && p) { e.stopPropagation(); menu(a, [{ label: "＋ Add songs", fn: () => go({ type: "pick", id: p.id }) }, { label: "✎  Rename", fn: () => renamePl(p) }, { label: "📁 Move to folder…", fn: () => folderMenu(a, p) }, Srv.on() && { label: p.shared ? "👪 Stop sharing with family" : "👪 Share with family", fn: () => { p.shared = !p.shared; savePl(p); toast(p.shared ? "Your family can now see and play this playlist" : "This playlist is private again"); render(); } }, "-", { label: "Delete playlist", danger: true, fn: () => deletePl(p) }]); }
 });
 // Drag songs to reorder a playlist
 let dragI = -1;
@@ -623,9 +841,11 @@ $("#folderInput").onchange = e => { importFolder(e.target.files); e.target.value
 
 (async () => {
   try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist(); } catch {}
-  songs = (await DB.all("songs")).filter(s => s.file instanceof Blob);
-  const all = (await DB.all("playlists")).sort((a, b) => a.created - b.created);
-  folders = all.filter(x => x.folder); playlists = all.filter(x => !x.folder);
+  if (!await Srv.boot()) {
+    songs = (await DB.all("songs")).filter(s => s.file instanceof Blob);
+    const all = (await DB.all("playlists")).sort((a, b) => a.created - b.created);
+    folders = all.filter(x => x.folder); playlists = all.filter(x => !x.folder);
+  }
   libReady = true; render();
 })();
 
@@ -891,7 +1111,8 @@ const Lyrics = (() => {
     NP.load(t);
     track = t; set("", ""); status.textContent = "Looking for lyrics…";
     if (!t) { status.textContent = "Play a song to see its lyrics."; return; }
-    let text = t.lrc || store.get(key(t), null), src = "Saved";
+    if (!t.lrc && t.remote && t.hasLrc) { try { t.lrc = t._lrcSent = await Srv.lyrics(t); } catch {} if (track !== t) return; }
+    let text = t.lrc || store.get(key(t), null), src = t.remote && t.lrc ? "From the family server" : "Saved";
     if (!text) { text = await fromId3(t.file).catch(() => null); src = "From the song file"; }
     if (!text && online) { text = await fromOnline(t); src = "From LRCLIB"; }
     if (track !== t) return;           // the song changed while we were searching
@@ -1208,7 +1429,7 @@ const Sync = (() => {
     const go = () => { if (manual) { dialing = true; setState(`Connecting to ${code.toUpperCase()}…`); } setup(peer.connect("pulsewave-" + code, { reliable: true, serialization: "raw" })); };
     if (peer && peer.open) go(); else { onReady.push(go); start(); }
   }
-  function autoDial() { if (store.get("syncAuto", true)) devices().forEach(d => { if (!live().some(c => c.dev === d.id)) dial(d.id); }); }
+  function autoDial() { if (!Srv.on() && store.get("syncAuto", true)) devices().forEach(d => { if (!live().some(c => c.dev === d.id)) dial(d.id); }); }
   setInterval(() => { if (peer && peer.open && devices().length) autoDial(); }, 45000);
 
   /* --- UI --- */
@@ -1242,7 +1463,10 @@ const Sync = (() => {
     try { const qr = qrcode(0, "M"); qr.addData(url); qr.make(); $("#syncQr").innerHTML = qr.createSvgTag({ cellSize: 4, margin: 2, scalable: true }); } catch { $("#syncQr").textContent = ""; }
     $("#syncQr").title = url;
   }
-  function open() { start(); showCode(); renderDevices(); progress(); $("#syncModal").classList.remove("hidden"); }
+  function open() {
+    if (Srv.on()) { toast("You're using the family server, so your music is already on every device you sign in on. Sync is for this device's own library."); return; }
+    start(); showCode(); renderDevices(); progress(); $("#syncModal").classList.remove("hidden");
+  }
   $("#syncBtn").onclick = open;
   $("#syncClose").onclick = () => $("#syncModal").classList.add("hidden");
   $("#syncModal").onclick = e => { if (e.target.id === "syncModal") $("#syncModal").classList.add("hidden"); };

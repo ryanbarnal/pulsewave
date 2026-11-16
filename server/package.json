@@ -1,0 +1,12 @@
+{
+  "name": "pulsewave-server",
+  "version": "1.0.0",
+  "description": "Private family music server for Pulsewave. Created by Ryan Ocbina Barnal.",
+  "author": "Ryan Ocbina Barnal",
+  "license": "GPL-3.0-only",
+  "type": "module",
+  "main": "server.mjs",
+  "engines": { "node": ">=22" },
+  "scripts": { "start": "node server.mjs" },
+  "dependencies": { "music-metadata": "12.3.3" }
+}

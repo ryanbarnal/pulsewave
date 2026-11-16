@@ -1,0 +1,18 @@
+# Pulsewave Server for QNAP Container Station (Applications → Create → paste this)
+# Change the two folder paths on the left of ":" if your music lives somewhere else.
+services:
+  pulsewave:
+    image: ghcr.io/ryanbarnal/pulsewave-server:latest
+    container_name: pulsewave
+    restart: unless-stopped
+    ports:
+      - "8095:8095"
+    environment:
+      SERVER_NAME: "Barnal Family Music"
+      RESCAN_HOURS: "6"
+    volumes:
+      # your music folder on the NAS (Pulsewave never deletes or changes your files;
+      # songs the family adds go into a "Pulsewave Uploads" folder inside it)
+      - /share/Multimedia/Music:/music
+      # accounts, playlists, favorites, lyrics and cover-art cache
+      - /share/Container/pulsewave:/data
