@@ -22,7 +22,7 @@ services:
 
   # Publishes the server securely at https://media.ryanbarnal.com, with no router changes
   tunnel:
-    image: cloudflare/cloudflared:2024.12.2
+    image: cloudflare/cloudflared:2026.10.7
     container_name: pulsewave-tunnel
     restart: unless-stopped
     command: tunnel --no-autoupdate run

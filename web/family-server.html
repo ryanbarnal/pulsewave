@@ -60,7 +60,7 @@ footer{text-align:center;color:var(--muted);padding:20px 16px 40px}footer strong
 
   # Publishes the server securely at https://media.ryanbarnal.com, with no router changes
   tunnel:
-    image: cloudflare/cloudflared:2024.12.2
+    image: cloudflare/cloudflared:2026.10.7
     container_name: pulsewave-tunnel
     restart: unless-stopped
     command: tunnel --no-autoupdate run
