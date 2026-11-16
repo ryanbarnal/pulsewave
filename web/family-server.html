@@ -41,7 +41,7 @@ footer{text-align:center;color:var(--muted);padding:20px 16px 40px}footer strong
 <p>Open <b>Container Station → Applications → Create</b>. Name it <code>pulsewave</code> and paste this:</p>
 <pre><button class="copy" onclick="navigator.clipboard.writeText(this.nextElementSibling.textContent);this.textContent='Copied ✓'">Copy</button><code>services:
   pulsewave:
-    image: ghcr.io/ryanbarnal/pulsewave-server:latest
+    image: ghcr.io/ryanbarnal/pulsewave-server:1.2.0
     container_name: pulsewave
     restart: unless-stopped
     ports:
@@ -135,7 +135,7 @@ Subdomain <code>media</code> · Domain <code>ryanbarnal.com</code> · Type <code
 <li><b>Album art and lyrics:</b> taken from the files, or from a <code>cover.jpg</code> / <code>folder.jpg</code> in the album folder, or from a <code>.lrc</code> file next to a song with the same name.</li>
 <li><b>Removing a song:</b> as admin, use <b>⋯ → Remove from family library</b>. This hides it for everyone. Pulsewave never deletes your files. <b>Restore removed songs</b> brings them back.</li>
 <li><b>Forgotten password:</b> as admin, use <b>🏠 → Reset password</b> next to that person.</li>
-<li><b>Updating:</b> in Container Station, open <b>pulsewave</b> → <b>Action → Recreate</b>, or remove and create it again with the same settings. Accounts and playlists are kept in <code>Container/pulsewave</code>.</li>
+<li><b>Updating:</b> in Container Station, open <b>Applications → pulsewave → Edit</b>, change the version at the end of the <code>image: ghcr.io/ryanbarnal/pulsewave-server:…</code> line to the newest one, then <b>Update</b>. Accounts and playlists are kept in <code>Container/pulsewave</code>.</li>
 <li><b>Backup:</b> include the <code>Container/pulsewave</code> folder in your NAS backup (Hybrid Backup Sync).</li>
 </ul></section>
 

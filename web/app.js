@@ -273,22 +273,23 @@ const Srv = (() => {
     const base = n => n.replace(/\.[^.]+$/, "").toLowerCase();
     const lrcs = files.filter(f => /\.lrc$/i.test(f.name));
     const list = files.filter(f => /\.(mp3|m4a|aac|flac|ogg|oga|opus|wav|webm|aiff?|alac)$/i.test(f.name));
-    const ids = [];
+    const ids = [], problems = [];
+    if (!list.length) { await ask("No songs to add", null, "OK", "Choose audio files such as MP3, M4A, FLAC, WAV or OGG."); return []; }
     for (const [i, f] of list.entries()) {
       toast(`Uploading ${i + 1} of ${list.length}: ${f.name}`);
       try {
+        if (f.size > 1024 * 1024 * 95) throw new Error("too big to upload over the internet (over 95 MB). Copy it into the NAS music folder instead");
         const r = await call(`upload?name=${encodeURIComponent(f.name)}&folder=${encodeURIComponent(folder || "")}`, { method: "PUT", body: f });
         ids.push(r.id);
         const l = lrcs.find(x => base(x.name) === base(f.name));
         if (l) await call("lyrics/" + r.id, { method: "PUT", body: await l.text() }).catch(() => {});
-      } catch (e) { toast(`${f.name}: ${e.message}`); }
+      } catch (e) { problems.push(`${f.name}: ${e.message}`); }
     }
-    if (!ids.length) return [];
-    toast("Updating the family library…");
-    await call("rescan?wait=1", { method: "POST" });
-    await reload();
-    toast(`Added ${plural(ids.length, "song")} to the family library`);
-    return ids.map(id => songs.find(s => s.id === id)).filter(Boolean);
+    if (ids.length) await reload();
+    const added = ids.map(id => songs.find(s => s.id === id)).filter(Boolean);
+    if (problems.length) await ask(added.length ? `Added ${plural(added.length, "song")}, but some failed` : "Couldn't add the music", null, "OK", problems.slice(0, 6).join("\n") + (problems.length > 6 ? `\n…and ${problems.length - 6} more` : ""));
+    else if (added.length) toast(`Added ${plural(added.length, "song")} to the family library`);
+    return added;
   }
   async function removeSong(s) {
     if (!cfg.user || !cfg.user.admin) { toast("Only the admin can remove songs from the family library"); return false; }

@@ -368,3 +368,4 @@ kbd{background:var(--panel2);border:1px solid #ffffff33;border-radius:5px;paddin
 .signin-card .big{font-size:28px}.signin-card span:nth-child(2){flex:1;display:flex;flex-direction:column}.signin-card small{color:var(--muted)}.signin-card .chev{font-size:22px;color:var(--muted)}
 .guest-banner{display:flex;align-items:center;gap:8px;flex-wrap:wrap;background:var(--panel2);border-radius:12px;padding:10px 12px;margin-bottom:10px;font-size:14px}
 .guest-banner span{flex:1;min-width:160px}.guest-banner .btn{padding:6px 12px;font-size:13px}
+#askText{white-space:pre-line}

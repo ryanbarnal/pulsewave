@@ -9,7 +9,7 @@ import { fileURLToPath } from "node:url";
 import { parseFile } from "music-metadata";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const VERSION = "1.1.0";
+const VERSION = "1.2.0";
 const PORT = +(process.env.PORT || 8095);
 const MUSIC_DIR = path.resolve(process.env.MUSIC_DIR || "/music");
 const DATA_DIR = path.resolve(process.env.DATA_DIR || "/data");
@@ -102,6 +102,37 @@ function lyricText(common) {
   if (x.syncText && x.syncText.length) return x.syncText.map(s => { const t = (s.timestamp || 0) / 1000, m = Math.floor(t / 60); return `[${String(m).padStart(2, "0")}:${(t % 60).toFixed(2).padStart(5, "0")}] ${s.text}`; }).join("\n");
   return x.text || null;
 }
+// Read one song's tags, cover art and lyrics
+async function readSong(abs, st, prev) {
+  const rel = path.relative(path.dirname(MUSIC_DIR), abs), id = idOf(rel);
+  const base = path.basename(abs, path.extname(abs));
+  const song = { id, abs, rel, fname: path.basename(abs), size: st.size, mtime: st.mtimeMs, added: prev ? prev.added : Date.now(),
+    title: base, artist: "Unknown artist", album: "", duration: 0, year: "", genre: "", track: 0, art: null, lrc: null };
+  const m = base.split(" - "); if (m.length > 1) { song.artist = m[0].trim(); song.title = m.slice(1).join(" - ").trim(); }
+  try {
+    const md = await parseFile(abs, { duration: true });
+    const c = md.common;
+    if (c.title) song.title = c.title;
+    if (c.artist || c.albumartist) song.artist = c.artist || c.albumartist;
+    if (c.album) song.album = c.album;
+    if (c.year) song.year = String(c.year);
+    if (c.genre && c.genre[0]) song.genre = c.genre[0];
+    if (c.track && c.track.no) song.track = c.track.no;
+    song.duration = md.format.duration || 0;
+    const pic = c.picture && c.picture[0];
+    if (pic && pic.data && pic.data.length) {
+      const ext = /png/.test(pic.format) ? ".png" : /webp/.test(pic.format) ? ".webp" : ".jpg";
+      await fsp.writeFile(path.join(DATA_DIR, "art", id + ext), pic.data); song.art = id + ext;
+    }
+    const lt = lyricText(c);
+    if (lt) { await fsp.writeFile(path.join(DATA_DIR, "emb", id + ".lrc"), lt); song.lrc = "emb"; }
+  } catch (e) { /* unreadable tags: keep file-name info */ }
+  if (!song.art) for (const n of COVER_NAMES) { const p = path.join(path.dirname(abs), n); if (fs.existsSync(p)) { song.art = "dir:" + p; break; } }
+  const side = path.join(path.dirname(abs), base + ".lrc");
+  if (fs.existsSync(side)) song.lrc = "side";
+  return song;
+}
+const persistLibrary = () => save("library", { songs: Object.fromEntries(Object.entries(db.library.songs).map(([k, v]) => [k, { ...v, abs: undefined }])), scannedAt: db.library.scannedAt });
 async function scan() {
   if (scanning) return; scanning = true;
   const t0 = Date.now(), files = [], roots = [MUSIC_DIR];
@@ -115,35 +146,12 @@ async function scan() {
     let st; try { st = await fsp.stat(abs); } catch { continue; }
     const prev = old[id];
     if (prev && prev.size === st.size && prev.mtime === st.mtimeMs) { next[id] = { ...prev, abs }; continue; }
-    const base = path.basename(abs, path.extname(abs));
-    const song = { id, abs, rel, fname: path.basename(abs), size: st.size, mtime: st.mtimeMs, added: prev ? prev.added : Date.now(),
-      title: base, artist: "Unknown artist", album: "", duration: 0, year: "", genre: "", track: 0, art: null, lrc: null };
-    const m = base.split(" - "); if (m.length > 1) { song.artist = m[0].trim(); song.title = m.slice(1).join(" - ").trim(); }
-    try {
-      const md = await parseFile(abs, { duration: true });
-      const c = md.common;
-      if (c.title) song.title = c.title;
-      if (c.artist || c.albumartist) song.artist = c.artist || c.albumartist;
-      if (c.album) song.album = c.album;
-      if (c.year) song.year = String(c.year);
-      if (c.genre && c.genre[0]) song.genre = c.genre[0];
-      if (c.track && c.track.no) song.track = c.track.no;
-      song.duration = md.format.duration || 0;
-      const pic = c.picture && c.picture[0];
-      if (pic && pic.data && pic.data.length) {
-        const ext = /png/.test(pic.format) ? ".png" : /webp/.test(pic.format) ? ".webp" : ".jpg";
-        await fsp.writeFile(path.join(DATA_DIR, "art", id + ext), pic.data); song.art = id + ext;
-      }
-      const lt = lyricText(c);
-      if (lt) { await fsp.writeFile(path.join(DATA_DIR, "emb", id + ".lrc"), lt); song.lrc = "emb"; }
-    } catch (e) { /* unreadable tags: keep file-name info */ }
-    if (!song.art) for (const n of COVER_NAMES) { const p = path.join(path.dirname(abs), n); if (fs.existsSync(p)) { song.art = "dir:" + p; break; } }
-    const side = path.join(path.dirname(abs), base + ".lrc");
-    if (fs.existsSync(side)) song.lrc = "side";
-    next[id] = song;
+    next[id] = await readSong(abs, st, prev);
   }
+  // keep songs uploaded while this scan was running (the scan may have passed their folder already)
+  for (const [id, s] of Object.entries(db.library.songs)) if (!next[id] && s.uploader && fs.existsSync(s.abs)) next[id] = s;
   db.library = { songs: next, scannedAt: Date.now() };
-  save("library", { songs: Object.fromEntries(Object.entries(next).map(([k, v]) => [k, { ...v, abs: undefined }])), scannedAt: db.library.scannedAt });
+  persistLibrary();
   scanning = false;
   log(`scan: ${Object.keys(next).length} songs in ${((Date.now() - t0) / 1000).toFixed(1)}s`);
 }
@@ -305,17 +313,21 @@ async function api(req, res, url) {
     if (!name || !AUDIO_EXT.has(path.extname(name).toLowerCase())) return err(res, 400, "Only audio files can be added");
     const dir = path.join(UPLOAD_DIR, safeName(me.name), folder);
     if (!dir.startsWith(UPLOAD_DIR)) return err(res, 400, "Bad folder");
-    await fsp.mkdir(dir, { recursive: true });
+    try { await fsp.mkdir(dir, { recursive: true }); fs.accessSync(dir, fs.constants.W_OK); }
+    catch (e) { log(`upload: can't write to ${dir}: ${e.message}`); return err(res, 500, "The server can't save files to the music folder. Check the NAS folder permissions (see the guide)."); }
     const dest = path.join(dir, name), tmp = dest + ".part";
     await new Promise((resolve, reject) => {
       let n = 0; const out = fs.createWriteStream(tmp);
       req.on("data", c => { n += c.length; if (n > 1024 * 1024 * 1024) { req.destroy(); out.destroy(); reject(new Error("too large")); } });
       req.pipe(out); out.on("finish", resolve); out.on("error", reject); req.on("error", reject);
-    }).catch(e => { try { fs.unlinkSync(tmp); } catch {} throw e; });
+    }).catch(e => { try { fs.unlinkSync(tmp); } catch {} log(`upload failed for ${me.name}: ${e.message}`); throw e; });
     await fsp.rename(tmp, dest);
-    const rel = path.relative(path.dirname(MUSIC_DIR), dest), id = idOf(rel);
-    log(`upload: ${me.name} added ${rel}`);
-    return send(res, 200, { ok: true, id });
+    // add it to the library right away, no full rescan needed
+    const song = await readSong(dest, await fsp.stat(dest), null);
+    song.uploader = me.name; delete db.hidden[song.id];
+    db.library.songs[song.id] = song; persistLibrary();
+    log(`upload: ${me.name} added ${song.rel}`);
+    return send(res, 200, { ok: true, id: song.id, song: songOut(song) });
   }
   if (p === "rescan" && M === "POST") {
     if (!me.admin && !me.upload) return err(res, 403, "Admins only");
