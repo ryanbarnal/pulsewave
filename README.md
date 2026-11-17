@@ -5,6 +5,7 @@
 **Web app:** https://pulsewave.ryanbarnal.com · **Downloads:** https://pulsewave.ryanbarnal.com/download.html · **Manual:** https://pulsewave.ryanbarnal.com/help.html
 
 ## Features
+- Phone layout with a bottom tab bar and mini player; minimal outline icons; Dark / Light / Auto appearance and six accent colours; Lite visuals for phones
 - Animated intro
 - 5 visual effects (Bars, Wave, Radial, Galaxy, Tunnel), 5 color themes and beat-reactive glow
 - Letter-by-letter lyrics that follow the singer's voice, tap-to-time exact word timing, 13 lyric fonts

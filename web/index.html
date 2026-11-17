@@ -36,10 +36,11 @@
   <header class="topbar">
     <div class="brand"><img src="logo.svg" alt=""><span data-appname></span></div>
     <div class="top-actions">
-      <button class="icon-btn" id="fullscreenBtn" title="Full-screen visuals (F)">⛶</button>
-      <button class="icon-btn sync-btn" id="srvBtn" title="Family server">🏠</button>
-      <button class="icon-btn sync-btn" id="syncBtn" title="Sync with your other devices">⇄</button>
-      <button class="icon-btn" id="helpBtn" title="Help (H)">?</button>
+      <button class="icon-btn" id="fullscreenBtn" title="Full-screen visuals (F)" aria-label="Full screen"><i data-ic="expand"></i></button>
+      <button class="icon-btn sync-btn" id="srvBtn" title="Family server" aria-label="Family server"><i data-ic="home"></i></button>
+      <button class="icon-btn sync-btn" id="syncBtn" title="Sync with your other devices" aria-label="Sync devices"><i data-ic="sync"></i></button>
+      <button class="icon-btn" id="setBtn" title="Settings: theme and visuals" aria-label="Settings"><i data-ic="gear"></i></button>
+      <button class="icon-btn" id="helpBtn" title="Help (H)" aria-label="Help"><i data-ic="help"></i></button>
     </div>
   </header>
 
@@ -58,28 +59,27 @@
           <div class="tt-top"><span id="ttCount"></span><span class="muted">Tap when each <b>highlighted</b> word is sung · Space/Enter = tap · Backspace = undo</span></div>
           <div id="ttLines" class="tt-lines"></div>
           <div class="tt-btns">
-            <button class="btn" id="ttBack" title="Back 5 seconds">⏪ 5s</button>
-            <button class="btn" id="ttUndo">↶ Undo</button>
+            <button class="btn" id="ttBack" title="Back 5 seconds">−5 s</button>
+            <button class="btn" id="ttUndo">Undo</button>
             <button class="btn primary tt-tap" id="ttTap">TAP</button>
-            <button class="btn" id="ttSave">✓ Save</button>
+            <button class="btn" id="ttSave">Save</button>
             <button class="btn" id="ttCancel">Cancel</button>
           </div>
         </div>
-        <div class="trivia" id="trivia"><span class="trivia-k">💡 Did you know?</span><p id="triviaText"></p></div>
+        <div class="trivia" id="trivia"><span class="trivia-k">Did you know?</span><p id="triviaText"></p></div>
       </div>
       <div class="viz-modes" id="vizModes">
-        <button data-mode="bars" class="active">Bars</button>
-        <button data-mode="wave">Wave</button>
-        <button data-mode="radial">Radial</button>
-        <button data-mode="galaxy">Galaxy</button>
-        <button data-mode="tunnel">Tunnel</button>
+        <button class="pill active" data-mode="bars">Bars</button>
+        <button class="pill" data-mode="wave">Wave</button>
+        <button class="pill" data-mode="radial">Radial</button>
+        <button class="pill" data-mode="galaxy">Galaxy</button>
+        <button class="pill" data-mode="tunnel">Tunnel</button>
       </div>
       <div class="stage-btns">
-        <button id="lyricsBtn" class="ly-toggle" title="Switch between lyrics and visual effects (L)">🎤 Lyrics</button>
-        <button id="karaokeBtn" title="Karaoke mode: turn down the singer's voice (K)">🎙 Karaoke</button>
+        <button id="lyricsBtn" class="ly-toggle" title="Switch between lyrics and visual effects (L)"><i data-ic="lyrics"></i>Lyrics</button>
+        <button id="karaokeBtn" title="Karaoke mode: turn down the singer's voice (K)"><i data-ic="mic"></i>Karaoke</button>
       </div>
       <div id="lyrics" class="lyrics empty"><div id="lyricsLines" class="ly-lines"></div></div>
-      <div class="theme-dots" id="themeDots"></div>
       <div class="empty-hint" id="emptyHint">
         <p>Drop music here or</p>
         <label class="btn primary">Add music<input type="file" id="fileInput" accept="audio/*,.lrc,.txt" multiple hidden></label>
@@ -100,36 +100,36 @@
         <span id="durTime">0:00</span>
       </div>
       <div class="controls">
-        <button class="ctl" id="shuffleBtn" title="Shuffle (S)">🔀</button>
-        <button class="ctl" id="prevBtn" title="Previous (←)">⏮</button>
-        <button class="ctl play" id="playBtn" title="Play / Pause (Space)">▶</button>
-        <button class="ctl" id="nextBtn" title="Next (→)">⏭</button>
-        <button class="ctl" id="repeatBtn" title="Repeat (R)">🔁</button>
+        <button class="ctl" id="shuffleBtn" title="Shuffle (S)" aria-label="Shuffle"><i data-ic="shuffle"></i></button>
+        <button class="ctl" id="prevBtn" title="Previous (←)" aria-label="Previous"><i data-ic="prev"></i></button>
+        <button class="ctl play" id="playBtn" title="Play / Pause (Space)" aria-label="Play"><i data-ic="play"></i></button>
+        <button class="ctl" id="nextBtn" title="Next (→)" aria-label="Next"><i data-ic="next"></i></button>
+        <button class="ctl" id="repeatBtn" title="Repeat (R)" aria-label="Repeat"><i data-ic="repeat"></i></button>
       </div>
       <div class="vol">
-        <button class="ctl small" id="muteBtn" title="Mute (M)">🔊</button>
+        <button class="ctl small" id="muteBtn" title="Mute (M)" aria-label="Mute"><i data-ic="vol"></i></button>
         <input type="range" id="volume" min="0" max="100" value="80">
       </div>
     </section>
 
     <section class="panels">
       <div class="tabs">
-        <button data-tab="library" class="active">Library</button>
-        <button data-tab="eq">Equalizer</button>
-        <button data-tab="lyrics">Lyrics</button>
+        <button class="pill active" data-tab="library">Library</button>
+        <button class="pill" data-tab="eq">Equalizer</button>
+        <button class="pill" data-tab="lyrics">Lyrics</button>
       </div>
 
       <div class="panel" id="panel-library">
         <div class="lib-top">
           <input type="search" id="libSearch" placeholder="Search your library" aria-label="Search your library">
-          <label class="btn primary" title="Add music">＋ Add<input type="file" id="fileInput2" accept="audio/*,.lrc,.txt" multiple hidden></label>
+          <label class="btn primary" title="Add music"><i data-ic="plus"></i>Add<input type="file" id="fileInput2" accept="audio/*,.lrc,.txt" multiple hidden></label>
         </div>
         <div class="lib-nav" id="libNav">
-          <button data-view="playlists">Playlists</button>
-          <button data-view="songs">Songs</button>
-          <button data-view="artists">Artists</button>
-          <button data-view="albums">Albums</button>
-          <button data-view="queue">Up Next</button>
+          <button class="pill" data-view="playlists">Playlists</button>
+          <button class="pill" data-view="songs">Songs</button>
+          <button class="pill" data-view="artists">Artists</button>
+          <button class="pill" data-view="albums">Albums</button>
+          <button class="pill" data-view="queue">Up Next</button>
         </div>
         <div id="libView" class="lib-view"></div>
         <input type="file" id="folderInput" webkitdirectory directory multiple hidden>
@@ -149,7 +149,7 @@
       </div>
 
       <div class="panel hidden" id="panel-lyrics">
-        <label class="switch ly-opt karaoke-opt"><input type="checkbox" id="karaokeOn"> <span><b>🎙 Karaoke mode</b><br><small class="muted">Turns down the singer's voice so you can sing along</small></span></label>
+        <label class="switch ly-opt karaoke-opt"><input type="checkbox" id="karaokeOn"> <span><b>Karaoke mode</b><br><small class="muted">Turns down the singer's voice so you can sing along</small></span></label>
         <p class="ly-status" id="lyStatus">Play a song to see its lyrics.</p>
         <div class="ly-row">
           <label class="btn">Load .lrc<input type="file" id="lyFile" accept=".lrc,.txt" hidden></label>
@@ -171,7 +171,7 @@
         <label class="switch ly-opt"><input type="checkbox" id="lyCaps"> ALL CAPS</label>
         <label class="switch ly-opt"><input type="checkbox" id="lyFollow" checked> Follow the singer's voice (letters light up while they sing)</label>
         <div class="tt-box">
-          <b>⏱ Tap to time</b>
+          <b>Tap to time</b>
           <p class="muted">Make the lyrics match the singer exactly: play the song and tap on every word as it is sung.</p>
           <button class="btn primary" id="ttStartBtn">Start timing this song</button>
         </div>
@@ -189,14 +189,14 @@
 <!-- ===== Help modal ===== -->
 <div id="helpModal" class="modal hidden">
   <div class="modal-box">
-    <button class="close" id="helpClose">✕</button>
+    <button class="icon-btn close" id="helpClose" aria-label="Close"><i data-ic="close"></i></button>
     <h2>Quick help</h2>
     <ul>
       <li><b>Add music:</b> press <em>Add music</em> or drag audio files onto the window.</li>
       <li><b>Visual effects:</b> pick Bars, Wave, Radial, Galaxy or Tunnel. The colored dots change the theme.</li>
       <li><b>Equalizer:</b> open the <em>Equalizer</em> tab, drag the 10 sliders or choose a preset.</li>
       <li><b>Library &amp; playlists:</b> songs you add are saved on this device. In <em>Library</em>, browse Playlists, Songs, Artists and Albums. Tap <em>New Playlist</em> to make one, or use <b>⋯</b> on any song → <em>Add to playlist</em>.</li>
-      <li><b>Lyrics:</b> appear over the visuals. They come from a matching <em>.lrc</em> file, the song file itself, or an online search. You can also paste them in the <em>Lyrics</em> tab. Press 🎤 or <kbd>L</kbd> to hide them.</li>
+      <li><b>Lyrics:</b> appear over the visuals. They come from a matching <em>.lrc</em> file, the song file itself, or an online search. You can also paste them in the <em>Lyrics</em> tab. Press <em>Lyrics</em> or <kbd>L</kbd> to switch between lyrics and visual effects.</li>
       <li><b>Full-screen visuals:</b> press ⛶ or <kbd>F</kbd>.</li>
     </ul>
     <h3>Keyboard shortcuts</h3>
@@ -228,8 +228,8 @@
 </div>
 <div id="syncModal" class="modal hidden">
   <div class="modal-box sync-box">
-    <button class="close" id="syncClose">✕</button>
-    <h2>⇄ Sync devices</h2>
+    <button class="icon-btn close" id="syncClose" aria-label="Close"><i data-ic="close"></i></button>
+    <h2>Sync devices</h2>
     <p class="muted">Keep your songs, playlists, folders and favorites the same on your phone and computer. Pulsewave needs to be open on both devices while they sync.</p>
     <div class="sync-pair">
       <div class="qr" id="syncQr"></div>
@@ -249,17 +249,47 @@
     <label class="switch sync-auto"><input type="checkbox" id="syncAuto" checked> Sync automatically whenever both devices are open</label>
   </div>
 </div>
+<!-- ===== Phone: mini player + tab bar ===== -->
+<div class="mini" id="mini">
+  <img id="miniArt" src="logo.svg" alt="">
+  <button class="mt" id="miniOpen"><b id="miniTitle">Nothing playing</b><small id="miniSub"></small></button>
+  <button class="ctl" id="miniPlay" aria-label="Play / pause"><i data-ic="play"></i></button>
+  <button class="ctl" id="miniNext" aria-label="Next"><i data-ic="next"></i></button>
+  <span class="bar"><i id="miniBar"></i></span>
+</div>
+<nav class="mnav" id="mnav">
+  <button data-m="np" class="active"><i data-ic="disc"></i>Playing</button>
+  <button data-m="library"><i data-ic="library"></i>Library</button>
+  <button data-m="lyrics"><i data-ic="lyrics"></i>Lyrics</button>
+  <button data-m="eq"><i data-ic="sliders"></i>EQ</button>
+</nav>
+
+<!-- ===== Settings ===== -->
+<div id="setModal" class="modal hidden">
+  <div class="modal-box set-box">
+    <button class="icon-btn close" id="setClose" aria-label="Close"><i data-ic="close"></i></button>
+    <h2>Settings</h2>
+    <div class="set-row"><b>Appearance</b>
+      <div class="seg" id="setMode"><button data-v="auto">Auto</button><button data-v="dark">Dark</button><button data-v="light">Light</button></div></div>
+    <div class="set-row"><b>Accent colour</b><div class="swatches" id="themeDots"></div></div>
+    <div class="set-row"><b>Visual effects</b>
+      <div class="seg" id="setQuality"><button data-v="auto">Auto</button><button data-v="high">Full</button><button data-v="lite">Lite</button><button data-v="off">Off</button></div>
+      <p class="set-note" id="setQualityNote"></p></div>
+    <div class="set-row"><b>Intro animation</b>
+      <div class="seg" id="setIntro"><button data-v="rings">Rings</button><button data-v="equalizer">EQ</button><button data-v="wave">Wave</button><button data-v="glitch">Glitch</button><button data-v="burst">Burst</button></div></div>
+    <p class="muted small"><span data-appname></span> v<span data-version></span> · Created by <strong data-credit></strong></p>
+  </div>
+</div>
+
 <div id="srvModal" class="modal hidden">
   <div class="modal-box srv-box">
-    <button class="close" id="srvClose">✕</button>
-    <h2>🏠 Family server</h2>
+    <button class="icon-btn close" id="srvClose" aria-label="Close"><i data-ic="close"></i></button>
+    <h2>Family server</h2>
     <div id="srvBody"></div>
   </div>
 </div>
 <div id="toast" class="toast hidden" role="status"></div>
 <div id="dropOverlay" class="hidden">Drop to add music</div>
-<script src="vendor/peerjs.min.js"></script>
-<script src="vendor/qrcode.js"></script>
 <script src="app.js"></script>
 </body>
 </html>
