@@ -30,6 +30,8 @@ jobs:
           name: installers-${{ runner.os }}
           path: |
             dist/*.exe
+            dist/*.exe.blockmap
+            dist/latest.yml
             dist/*.dmg
   release:
     needs: build
