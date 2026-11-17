@@ -229,9 +229,32 @@ const PRESETS = {
 };
 let eqGains = store.get("eq", PRESETS.Flat.slice());
 
+// Keep the sound clean: when the EQ or bass boost raises some frequencies, lower the overall level
+// by the same amount (headroom), then a limiter catches any remaining peaks. No more distortion.
+let preamp = null, limiter = null, eqProbe = null;
+function updateHeadroom() {
+  if (!preamp) return;
+  try {
+    if (!eqProbe) {
+      const oc = new OfflineAudioContext(1, 128, 44100), N = 240;
+      eqProbe = { f: new Float32Array(N).map((_, i) => 20 * Math.pow(1000, i / (N - 1))), m: new Float32Array(N), ph: new Float32Array(N), tot: new Float32Array(N),
+        nodes: [...BANDS.map((fr, i) => { const b = oc.createBiquadFilter(); b.type = i === 0 ? "lowshelf" : i === BANDS.length - 1 ? "highshelf" : "peaking"; b.frequency.value = fr; b.Q.value = 1.1; return b; }),
+          Object.assign(oc.createBiquadFilter(), { type: "lowshelf" })] };
+      eqProbe.nodes[BANDS.length].frequency.value = 90;
+    }
+    const P = eqProbe, gains = [...BANDS.map((_, i) => eqOn.checked ? eqGains[i] : 0), +$("#bassBoost").value];
+    P.tot.fill(1);
+    P.nodes.forEach((n, i) => { n.gain.value = gains[i]; n.getFrequencyResponse(P.f, P.m, P.ph); for (let k = 0; k < P.f.length; k++) P.tot[k] *= P.m[k]; });
+    const boost = Math.max(0, 20 * Math.log10(Math.max(...P.tot)));
+    preamp.gain.setTargetAtTime(Math.pow(10, -boost / 20), ctx.currentTime, 0.05);
+    const h = $("#eqHeadroom"); if (h) h.textContent = boost > 0.5 ? `To keep the sound clean, the volume is lowered by ${boost.toFixed(1)} dB while these boosts are on.` : "";
+  } catch {}
+}
 function initAudio() {
   if (ctx) return;
-  ctx = new (window.AudioContext || window.webkitAudioContext)();
+  // "playback" = a bigger sound buffer, meant for music; the default is tuned for games and crackles more easily
+  const AC = window.AudioContext || window.webkitAudioContext;
+  try { ctx = new AC({ latencyHint: "playback" }); } catch { ctx = new AC(); }
   const src = ctx.createMediaElementSource(audio);
   filters = BANDS.map((f, i) => {
     const b = ctx.createBiquadFilter();
@@ -245,7 +268,7 @@ function initAudio() {
   analyser = ctx.createAnalyser(); analyser.fftSize = 2048; analyser.smoothingTimeConstant = 0.8;
   const dry = ctx.createGain(), wet = ctx.createGain(), split = ctx.createChannelSplitter(2), inv = ctx.createGain(),
     diff = ctx.createGain(), merge = ctx.createChannelMerger(2), lowKeep = ctx.createBiquadFilter(), mix = ctx.createGain();
-  inv.gain.value = -1; diff.gain.value = 1.2; lowKeep.type = "lowpass"; lowKeep.frequency.value = 150;
+  inv.gain.value = -1; diff.gain.value = 1; lowKeep.type = "lowpass"; lowKeep.frequency.value = 150;
   src.connect(dry); src.connect(split); split.connect(diff, 0); split.connect(inv, 1); inv.connect(diff);
   diff.connect(merge, 0, 0); diff.connect(merge, 0, 1); merge.connect(wet); src.connect(lowKeep); lowKeep.connect(wet);
   const midSum = ctx.createGain(); split.connect(midSum, 0); split.connect(midSum, 1);
@@ -253,10 +276,14 @@ function initAudio() {
   mBuf = new Float32Array(midAn.frequencyBinCount); sBuf = new Float32Array(sideAn.frequencyBinCount);
   midSum.connect(midAn); diff.connect(sideAn);
   dry.connect(mix); wet.connect(mix); kNodes = { dry, wet }; dry.gain.value = karaoke ? 0 : 1; wet.gain.value = karaoke ? 1 : 0;
-  let n = mix; [...filters, bass, pan, master].forEach(f => { n.connect(f); n = f; });
+  preamp = ctx.createGain();
+  limiter = ctx.createDynamicsCompressor();
+  Object.entries({ threshold: -1.5, knee: 0, ratio: 20, attack: 0.002, release: 0.2 }).forEach(([k, v]) => { limiter[k].value = v; });
+  let n = mix; [preamp, ...filters, bass, pan, master, limiter].forEach(f => { n.connect(f); n = f; });
   n.connect(analyser); analyser.connect(ctx.destination);
+  if (/[?&]debug/.test(location.search)) window.__pwPeak = () => { const d = new Float32Array(analyser.fftSize); analyser.getFloatTimeDomainData(d); return d.reduce((m, v) => Math.max(m, Math.abs(v)), 0); };
   freq = new Uint8Array(analyser.frequencyBinCount); wave = new Uint8Array(analyser.fftSize);
-  applyEq(); bass.gain.value = +$("#bassBoost").value; setBalance();
+  applyEq(); bass.gain.value = +$("#bassBoost").value; setBalance(); updateHeadroom();
 }
 
 /* ---------- Family media server (Pulsewave Server on the NAS) ---------- */
@@ -278,7 +305,14 @@ const Srv = (() => {
   }
   const tok = () => encodeURIComponent(cfg.token);
   let guestInfo = null, shares = {};
-  const stream = s => s.share ? `${s.shareUrl}/api/stream/${s.id}?s=${s.share}` : `${clean(cfg.url)}/api/stream/${s.id}?t=${tok()}`;
+  const sq = () => encodeURIComponent(store.get("streamQ", "auto"));
+  const stream = s => s.share ? `${s.shareUrl}/api/stream/${s.id}?s=${s.share}&q=${sq()}` : `${clean(cfg.url)}/api/stream/${s.id}?t=${tok()}&q=${sq()}`;
+  // get the next song ready on the server so it starts without waiting
+  function prepare(s) {
+    if (!s || !s.remote || store.get("streamQ", "auto") === "original") return;
+    const u = s.share ? `${s.shareUrl}/api/prepare/${s.id}?s=${s.share}&q=${sq()}` : `${clean(cfg.url)}/api/prepare/${s.id}?t=${tok()}&q=${sq()}`;
+    fetch(u).catch(() => {});
+  }
   const art = s => s.share ? `${s.shareUrl}/api/art/${s.id}?s=${s.share}` : `${clean(cfg.url)}/api/art/${s.id}?t=${tok()}`;
   const mapSong = (r, favs, plays) => ({ id: r.id, remote: true, title: r.title, artist: r.artist, album: r.album, duration: r.duration, year: r.year, genre: r.genre,
     fname: r.fname, size: r.size, added: r.added, art: r.hasArt ? "remote" : null, hasLrc: r.hasLrc, fav: favs.has(r.id), plays: plays[r.id] || 0 });
@@ -520,7 +554,7 @@ const Srv = (() => {
   $("#srvClose").onclick = close;
   $("#srvModal").onclick = e => { if (e.target.id === "srvModal") close(); };
 
-  return { boot, on, stream, art, saveUser, banner, listenLink, stopLink, hasLink: p => !!shares[p.id], isGuest: () => !!guestInfo, putLyrics, lyrics, upload, removeSong, reload, open, user: () => cfg && cfg.user, name: () => cfg && cfg.name };
+  return { boot, on, stream, art, prepare, saveUser, banner, listenLink, stopLink, hasLink: p => !!shares[p.id], isGuest: () => !!guestInfo, putLyrics, lyrics, upload, removeSong, reload, open, user: () => cfg && cfg.user, name: () => cfg && cfg.name };
 })();
 
 /* ---------- Library, playlists & queue (saved on this device) ---------- */
@@ -680,7 +714,8 @@ function playList(list, i = 0, shuf = false) {
 }
 function load(i, play) {
   if (!tracks[i]) return;
-  cur = i; audio.src = srcUrl(tracks[i]); setMeta(); if (view.type === "queue") render(); else markPlaying();
+  cur = i; audio.preload = tracks[i].remote ? "auto" : "metadata"; audio.src = srcUrl(tracks[i]);
+  if (tracks[i].remote) setTimeout(() => Srv.prepare(tracks[i + 1] || (repeat === "all" ? tracks[0] : null)), 1500); setMeta(); if (view.type === "queue") render(); else markPlaying();
   tracks[i].plays = (tracks[i].plays || 0) + 1; tracks[i].lastPlayed = Date.now(); saveSong(tracks[i]);
   Lyrics.load(tracks[i]);
   if (play) playNow();
@@ -1035,6 +1070,16 @@ $("#playBtn").onclick = toggle; $("#nextBtn").onclick = () => next(false); $("#p
 audio.onplay = () => { setIc($("#playBtn"), "pause"); setIc($("#miniPlay"), "pause"); };
 audio.onpause = () => { setIc($("#playBtn"), "play"); setIc($("#miniPlay"), "play"); };
 audio.onended = () => next(true);
+let waitT = 0, stalls = [];
+audio.addEventListener("waiting", () => {
+  clearTimeout(waitT);
+  waitT = setTimeout(() => {
+    stalls = stalls.filter(t => Date.now() - t < 120000); stalls.push(Date.now());
+    const t = tracks[cur];
+    toast(t && t.remote ? (stalls.length >= 3 ? "The connection to the family server is slow, so the music keeps pausing to load. Try Wi-Fi." : "Loading… the connection is slow") : "Loading…");
+  }, 900);
+});
+audio.addEventListener("playing", () => clearTimeout(waitT));
 audio.onloadedmetadata = () => $("#durTime").textContent = fmt(audio.duration);
 let seeking = false;
 audio.ontimeupdate = () => {
@@ -1096,7 +1141,7 @@ $("#eqReset").onclick = () => { sel.value = "Flat"; eqGains = PRESETS.Flat.slice
 const eqOn = $("#eqOn"); eqOn.checked = store.get("eqOn", true);
 eqOn.onchange = applyEq;
 $("#bassBoost").value = store.get("bass", 0);
-$("#bassBoost").oninput = e => { if (bass) bass.gain.value = +e.target.value; store.set("bass", +e.target.value); };
+$("#bassBoost").oninput = e => { if (bass) bass.gain.value = +e.target.value; store.set("bass", +e.target.value); updateHeadroom(); };
 $("#balance").oninput = setBalance;
 function setBalance() { if (pan && pan.pan) pan.pan.value = $("#balance").value / 100; }
 function applyEq() {
@@ -1104,6 +1149,7 @@ function applyEq() {
   $("#panel-eq").classList.toggle("eq-off", !eqOn.checked);
   filters.forEach((f, i) => f.gain.setTargetAtTime(eqOn.checked ? eqGains[i] : 0, ctx.currentTime, 0.02));
   store.set("eq", eqGains); store.set("preset", sel.value); store.set("eqOn", eqOn.checked);
+  updateHeadroom();
 }
 applyEq();
 
@@ -1815,6 +1861,9 @@ addEventListener("keydown", e => {
   dots.onclick = e => { const b = e.target.closest("button"); if (b) { LOOK.accent = b.dataset.v; applyLook(); } };
   $("#setMode").onclick = e => { const b = e.target.closest("button"); if (b) { LOOK.mode = b.dataset.v; applyLook(); } };
   $("#setQuality").onclick = e => { const b = e.target.closest("button"); if (b) { LOOK.quality = b.dataset.v; applyLook(); } };
+  const sq = $("#setStream"), markSq = () => sq.querySelectorAll("button").forEach(b => b.classList.toggle("active", b.dataset.v === store.get("streamQ", "auto")));
+  sq.onclick = e => { const b = e.target.closest("button"); if (b) { store.set("streamQ", b.dataset.v); markSq(); toast("Applies from the next song"); } };
+  markSq();
   const intro = $("#setIntro"), curIntro = () => store.get("intro", C.intro || "rings");
   const markIntro = () => intro.querySelectorAll("button").forEach(b => b.classList.toggle("active", b.dataset.v === curIntro()));
   intro.onclick = e => { const b = e.target.closest("button"); if (b) { store.set("intro", b.dataset.v); markIntro(); toast("You'll see this intro next time you open Pulsewave"); } };

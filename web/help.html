@@ -13,7 +13,7 @@ kbd{background:#1c1c36;border:1px solid #ffffff33;border-radius:5px;padding:1px 
 .muted{color:var(--muted)}footer{text-align:center;color:var(--muted);padding:20px 16px 40px}footer strong{color:var(--text)}
 details{margin:10px 0}summary{cursor:pointer;font-weight:600}
 </style></head><body>
-<header><img src="logo.svg" alt=""><h1>Pulsewave User Manual</h1><p class="muted">Version 1.6 · Created by <strong>Ryan Ocbina Barnal</strong></p></header>
+<header><img src="logo.svg" alt=""><h1>Pulsewave User Manual</h1><p class="muted">Version 1.7 · Created by <strong>Ryan Ocbina Barnal</strong></p></header>
 <main>
 <nav><a href="#start">Getting started</a><a href="#look">Phone layout &amp; themes</a><a href="#install">Installing</a><a href="#play">Playing music</a><a href="#library">Library &amp; playlists</a><a href="#family">Family server</a><a href="#sync">Sync devices</a><a href="#viz">Visual effects</a><a href="#eq">Equalizer</a><a href="#lyrics">Lyrics</a><a href="#keys">Shortcuts</a><a href="#faq">FAQ &amp; troubleshooting</a></nav>
 
@@ -37,6 +37,7 @@ details{margin:10px 0}summary{cursor:pointer;font-weight:600}
 <ul><li><b>Appearance:</b> <em>Auto</em> follows your device's light or dark setting. You can also choose <em>Dark</em> or <em>Light</em>. The lyrics and visuals screen always stays dark so it's easy to read.</li>
 <li><b>Accent colour:</b> Sunset, Ocean, Forest, Grape, Rose or Mono. It colours the buttons, progress bar, highlights and visual effects.</li>
 <li><b>Visual effects:</b> <em>Auto</em> picks <em>Lite</em> on phones and slower computers, which is smoother and easier on the battery. <em>Full</em> uses every effect at full resolution. <em>Off</em> hides the effects; lyrics and album art still show.</li>
+<li><b>Streaming quality (family server):</b> <em>Auto</em> converts lossless (FLAC, WAV) and very large files to 192 kbps MP3 while streaming, so they play smoothly even when your home internet is slow. <em>High</em> (256 kbps), <em>Normal</em> (160 kbps) and <em>Saver</em> (96 kbps) use less mobile data. <em>Original</em> always sends the file as it is. The NAS keeps the converted copies so songs start faster next time. Your music files are never changed.</li>
 <li><b>Intro animation:</b> choose which intro plays when Pulsewave opens.</li></ul>
 <p>Your choices are remembered on each device.</p></section>
 
@@ -117,7 +118,7 @@ details{margin:10px 0}summary{cursor:pointer;font-weight:600}
 <section id="eq"><h2>5. Equalizer</h2>
 <p>Open the <b>Equalizer</b> tab. It has 10 bands: 32 Hz, 64, 125, 250, 500, 1k, 2k, 4k, 8k and 16 kHz. Each band goes from −12 to +12 dB.</p>
 <ul><li><b>Presets:</b> Flat, Bass Boost, Treble Boost, Rock, Pop, Jazz, Classical, Electronic, Hip-Hop, Vocal, Acoustic and Late Night</li><li><b>Custom:</b> drag any slider and the preset changes to Custom</li><li><b>EQ on:</b> switches the equalizer on or off, so you can compare</li><li><b>Bass boost:</b> adds up to +12 dB of deep bass</li><li><b>Balance:</b> shifts the sound left or right</li><li><b>Reset:</b> sets everything back to Flat</li></ul>
-<p class="muted">If the sound distorts, lower the volume or reduce the boosted bands.</p></section>
+<p class="muted">Boosting can make loud songs distort, so Pulsewave automatically lowers the overall volume by the amount you boost, and a built-in limiter catches any peaks. The EQ tab shows how much. If music sounds quieter with a preset, that is why. Turn your device volume up a little.</p></section>
 
 <section id="lyrics"><h2>6. Lyrics</h2>
 <p>Press <b>🎤 Lyrics</b> (or <kbd>L</kbd>) to switch the big screen between <b>lyrics</b> and <b>visual effects</b>.</p>
@@ -161,6 +162,7 @@ details{margin:10px 0}summary{cursor:pointer;font-weight:600}
 <table><tr><td><kbd>Space</kbd></td><td>Play / pause</td></tr><tr><td><kbd>←</kbd> <kbd>→</kbd></td><td>Previous / next track</td></tr><tr><td><kbd>Shift</kbd> + <kbd>←</kbd> / <kbd>→</kbd></td><td>Skip back / forward 10 seconds</td></tr><tr><td><kbd>↑</kbd> <kbd>↓</kbd></td><td>Volume</td></tr><tr><td><kbd>M</kbd></td><td>Mute</td></tr><tr><td><kbd>S</kbd></td><td>Shuffle</td></tr><tr><td><kbd>R</kbd></td><td>Repeat mode</td></tr><tr><td><kbd>V</kbd></td><td>Next visual effect</td></tr><tr><td><kbd>F</kbd></td><td>Full-screen visuals</td></tr><tr><td><kbd>L</kbd></td><td>Show / hide lyrics</td></tr><tr><td><kbd>K</kbd></td><td>Karaoke mode</td></tr><tr><td><kbd>H</kbd></td><td>Help</td></tr></table></section>
 
 <section id="faq"><h2>8. FAQ &amp; troubleshooting</h2>
+<details><summary>Rough, crackly or stuttering sound</summary><p><b>Crackly or distorted on loud songs:</b> set the Equalizer to <b>Flat</b> and Bass boost to 0 to compare. Pulsewave already lowers the volume to make room for boosts. <b>Pauses or stutters while streaming from the family server:</b> the connection is too slow to keep up. Pulsewave shows "Loading… the connection is slow" when that happens. Use Wi-Fi, or check the NAS's internet upload speed. <b>On an older phone:</b> set <b>Settings → Visual effects</b> to <b>Lite</b> or <b>Off</b>.</p></details>
 <details><summary>No sound</summary><p>Check the volume slider and the mute button, and your device's volume. On iPhone, also check the silent switch. Make sure you pressed <b>Tap to start</b>, because browsers only allow sound after a tap.</p></details>
 <details><summary>A song won't play</summary><p>Your device may not support that format. Convert it to MP3 or M4A.</p></details>
 <details><summary>Sync won't connect</summary><p>Make sure Pulsewave is open on both devices and both are online. Check that you typed the code correctly. Close and reopen ⇄ to try again. Some workplace or school networks block direct device connections. Try mobile data or a home network.</p></details>

@@ -3,7 +3,7 @@
 # 2. Paste your Cloudflare Tunnel token (see https://pulsewave.ryanbarnal.com/family-server.html).
 services:
   pulsewave:
-    image: ghcr.io/ryanbarnal/pulsewave-server:1.3.0
+    image: ghcr.io/ryanbarnal/pulsewave-server:1.4.0
     container_name: pulsewave
     restart: unless-stopped
     ports:

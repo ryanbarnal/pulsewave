@@ -5,11 +5,12 @@ import fs from "node:fs";
 import fsp from "node:fs/promises";
 import path from "node:path";
 import crypto from "node:crypto";
+import { spawn, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { parseFile } from "music-metadata";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const VERSION = "1.3.0";
+const VERSION = "1.4.0";
 const PORT = +(process.env.PORT || 8095);
 const MUSIC_DIR = path.resolve(process.env.MUSIC_DIR || "/music");
 const DATA_DIR = path.resolve(process.env.DATA_DIR || "/data");
@@ -119,6 +120,7 @@ async function readSong(abs, st, prev) {
     if (c.genre && c.genre[0]) song.genre = c.genre[0];
     if (c.track && c.track.no) song.track = c.track.no;
     song.duration = md.format.duration || 0;
+    song.bitrate = Math.round(md.format.bitrate || 0); song.lossless = !!md.format.lossless;
     const pic = c.picture && c.picture[0];
     if (pic && pic.data && pic.data.length) {
       const ext = /png/.test(pic.format) ? ".png" : /webp/.test(pic.format) ? ".webp" : ".jpg";
@@ -173,6 +175,60 @@ function shareSongs(id) {
   return { share: sh, pl, songs, ids: new Set(songs.map(s => s.id)) };
 }
 
+
+/* ---------------- lighter streaming: convert heavy files to MP3 (cached) ---------------- */
+const CACHE_DIR = path.join(DATA_DIR, "cache");
+fs.mkdirSync(CACHE_DIR, { recursive: true });
+const CACHE_MB = +(process.env.CACHE_MB || 4000);
+const LOSSLESS = new Set([".flac", ".wav", ".aiff", ".aif", ".alac"]);
+const QUALITIES = new Set([96, 128, 160, 192, 256, 320]);
+const hasFfmpeg = (() => { try { return spawnSync("ffmpeg", ["-version"], { timeout: 5000 }).status === 0; } catch { return false; } })();
+const jobs = new Map(); let running = 0; const waiting = [];
+const slot = () => new Promise(r => { if (running < 2) { running++; r(); } else waiting.push(r); });
+const free = () => { const n = waiting.shift(); if (n) n(); else running--; };
+async function bitrateOf(s) {
+  if (s.bitrate != null) return s.bitrate;
+  try { const md = await parseFile(s.abs, { duration: false, skipCovers: true }); s.bitrate = Math.round(md.format.bitrate || 0); s.lossless = !!md.format.lossless; } catch { s.bitrate = 0; }
+  return s.bitrate;
+}
+// "auto": only heavy files (lossless or above 256 kbps) become 192 kbps; a number = that bitrate when the file is bigger
+async function streamTarget(s, q) {
+  if (!hasFfmpeg || !q || q === "0" || q === "original") return 0;
+  const br = (await bitrateOf(s)) / 1000, lossless = s.lossless || LOSSLESS.has(path.extname(s.abs).toLowerCase());
+  if (q === "auto") return lossless || br > 260 ? 192 : 0;
+  const k = +q; if (!QUALITIES.has(k)) return 0;
+  return lossless || !br || br > k * 1.15 ? k : 0;
+}
+function transcode(s, kbps) {
+  const out = path.join(CACHE_DIR, `${s.id}-${s.size}-${kbps}.mp3`);
+  if (fs.existsSync(out)) { const t = new Date(); fs.utimes(out, t, t, () => {}); return Promise.resolve(out); }
+  if (jobs.has(out)) return jobs.get(out);
+  const job = (async () => {
+    await slot();
+    const tmp = out + ".part";
+    try {
+      await new Promise((resolve, reject) => {
+        const ff = spawn("ffmpeg", ["-v", "error", "-y", "-i", s.abs, "-map", "0:a:0", "-vn", "-c:a", "libmp3lame", "-b:a", kbps + "k", "-ar", "44100", "-id3v2_version", "3", "-f", "mp3", tmp], { stdio: ["ignore", "ignore", "pipe"] });
+        let e = ""; ff.stderr.on("data", d => { e += d; });
+        ff.on("error", reject); ff.on("close", c => c === 0 ? resolve() : reject(new Error("ffmpeg: " + e.slice(0, 200))));
+      });
+      fs.renameSync(tmp, out); pruneCache();
+      return out;
+    } catch (e) { fs.rmSync(tmp, { force: true }); log(`convert failed for "${s.title}": ${e.message}`); throw e; }
+    finally { free(); jobs.delete(out); }
+  })();
+  jobs.set(out, job); return job;
+}
+let pruning = false;
+function pruneCache() {
+  if (pruning) return; pruning = true;
+  try {
+    const files = fs.readdirSync(CACHE_DIR).filter(f => f.endsWith(".mp3")).map(f => { const p = path.join(CACHE_DIR, f), st = fs.statSync(p); return { p, size: st.size, t: st.mtimeMs }; }).sort((a, b) => a.t - b.t);
+    let total = files.reduce((a, f) => a + f.size, 0);
+    while (total > CACHE_MB * 1048576 && files.length) { const f = files.shift(); fs.rmSync(f.p, { force: true }); total -= f.size; }
+  } catch {} finally { pruning = false; }
+}
+
 /* ---------------- HTTP helpers ---------------- */
 function send(res, code, body, headers = {}) {
   const isObj = body && typeof body === "object" && !Buffer.isBuffer(body);
@@ -211,7 +267,7 @@ const safeName = n => String(n || "").replace(/[\/\\:*?"<>|\x00-\x1f]/g, "_").re
 /* ---------------- routes ---------------- */
 async function api(req, res, url) {
   const p = url.pathname.replace(/^\/api\//, ""), M = req.method, ip = ipOf(req);
-  if (p === "info") return send(res, 200, { pulsewaveServer: true, name: SERVER_NAME, version: VERSION, setup: Object.keys(db.users).length === 0, publicUrl: PUBLIC_URL || null });
+  if (p === "info") return send(res, 200, { pulsewaveServer: true, name: SERVER_NAME, version: VERSION, setup: Object.keys(db.users).length === 0, publicUrl: PUBLIC_URL || null, transcode: hasFfmpeg });
 
   if (p === "setup" && M === "POST") {
     if (Object.keys(db.users).length) return err(res, 403, "Already set up");
@@ -256,9 +312,15 @@ async function api(req, res, url) {
     return send(res, 200, { songs, scannedAt: db.library.scannedAt, scanning, progress: scanStats });
   }
   let m;
-  if ((m = /^stream\/([0-9a-f]{20})$/.exec(p))) {
-    const s = db.library.songs[m[1]]; if (!s || db.hidden[s.id] || !allowed(s.id)) return err(res, 404, "Not found");
-    return serveFile(req, res, s.abs, MIME[path.extname(s.abs).toLowerCase()] || "application/octet-stream", { "Cache-Control": "private, max-age=86400" });
+  if ((m = /^(stream|prepare)\/([0-9a-f]{20})$/.exec(p))) {
+    const s = db.library.songs[m[2]]; if (!s || db.hidden[s.id] || !allowed(s.id)) return err(res, 404, "Not found");
+    const kbps = await streamTarget(s, url.searchParams.get("q"));
+    if (m[1] === "prepare") { if (kbps) transcode(s, kbps).catch(() => {}); return send(res, 200, { ok: true, kbps }); }
+    if (kbps) {
+      try { const f = await transcode(s, kbps); return serveFile(req, res, f, "audio/mpeg", { "Cache-Control": "private, max-age=86400", "X-Pulsewave-Quality": kbps + "k" }); }
+      catch { /* conversion failed: fall back to the original file */ }
+    }
+    return serveFile(req, res, s.abs, MIME[path.extname(s.abs).toLowerCase()] || "application/octet-stream", { "Cache-Control": "private, max-age=86400", "X-Pulsewave-Quality": "original" });
   }
   if ((m = /^art\/([0-9a-f]{20})$/.exec(p))) {
     const s = db.library.songs[m[1]]; if (!s || !s.art || !allowed(s.id)) return err(res, 404, "No art");
@@ -390,7 +452,7 @@ const server = http.createServer(async (req, res) => {
     res.setHeader("Access-Control-Allow-Origin", "*");
     res.setHeader("Access-Control-Allow-Headers", "Authorization, Content-Type, Range");
     res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS");
-    res.setHeader("Access-Control-Expose-Headers", "Content-Range, Content-Length, Accept-Ranges");
+    res.setHeader("Access-Control-Expose-Headers", "Content-Range, Content-Length, Accept-Ranges, X-Pulsewave-Quality");
     res.setHeader("Access-Control-Allow-Private-Network", "true");
     res.setHeader("Cache-Control", res.getHeader("Cache-Control") || "no-store");
     if (req.method === "OPTIONS") { res.writeHead(204); return res.end(); }
@@ -407,6 +469,7 @@ const server = http.createServer(async (req, res) => {
 server.listen(PORT, () => {
   log(`Pulsewave Server ${VERSION} "${SERVER_NAME}" on port ${PORT}`);
   log(`music: ${MUSIC_DIR}  data: ${DATA_DIR}  uploads: ${UPLOAD_DIR}`);
+  log(hasFfmpeg ? "lighter streaming: on (ffmpeg found)" : "lighter streaming: off (ffmpeg not found)");
   if (PUBLIC_URL) log(`public address: ${PUBLIC_URL}${TRUST_PROXY ? " (behind a proxy/tunnel)" : ""}`);
   if (!Object.keys(db.users).length) log("No accounts yet: open the server in a browser to create the admin account.");
   scan().catch(e => log("scan failed", e.message));

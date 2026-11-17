@@ -145,6 +145,7 @@
         <div class="eq-extra">
           <label>Bass boost <input type="range" id="bassBoost" min="0" max="12" value="0"></label>
           <label>Balance <input type="range" id="balance" min="-100" max="100" value="0" title="Balance"></label>
+          <p class="set-note" id="eqHeadroom"></p>
         </div>
       </div>
 
@@ -275,6 +276,9 @@
     <div class="set-row"><b>Visual effects</b>
       <div class="seg" id="setQuality"><button data-v="auto">Auto</button><button data-v="high">Full</button><button data-v="lite">Lite</button><button data-v="off">Off</button></div>
       <p class="set-note" id="setQualityNote"></p></div>
+    <div class="set-row"><b>Streaming quality (family server)</b>
+      <div class="seg" id="setStream"><button data-v="auto">Auto</button><button data-v="original">Original</button><button data-v="256">High</button><button data-v="160">Normal</button><button data-v="96">Saver</button></div>
+      <p class="set-note">Auto streams lossless and very large files as 192 kbps MP3 so they play smoothly over a slow connection. Normal and Saver use less data. Your files on the NAS are never changed. Songs on this device always play in original quality.</p></div>
     <div class="set-row"><b>Intro animation</b>
       <div class="seg" id="setIntro"><button data-v="rings">Rings</button><button data-v="equalizer">EQ</button><button data-v="wave">Wave</button><button data-v="glitch">Glitch</button><button data-v="burst">Burst</button></div></div>
     <p class="muted small"><span data-appname></span> v<span data-version></span> · Created by <strong data-credit></strong></p>

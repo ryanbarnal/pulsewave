@@ -8,7 +8,7 @@ LABEL org.opencontainers.image.title="Pulsewave Server" \
 ENV NODE_ENV=production PORT=8095 MUSIC_DIR=/music DATA_DIR=/data WEB_DIR=/app/web
 WORKDIR /app/server
 COPY server/package.json server/package-lock.json ./
-RUN npm ci --omit=dev && npm cache clean --force
+RUN apk add --no-cache ffmpeg && npm ci --omit=dev && npm cache clean --force
 COPY server/server.mjs ./
 COPY web/ /app/web/
 VOLUME ["/data"]
