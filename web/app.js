@@ -13,10 +13,10 @@ const store = {
 /* ---------- Icons (one consistent outline set, no emoji) ---------- */
 const F = 'fill="currentColor" stroke="none"';
 const ICONS = {
-  play: `<path ${F} d="M7.5 4.9v14.2a.9.9 0 0 0 1.4.8l11.2-7.1a.9.9 0 0 0 0-1.6L8.9 4.1a.9.9 0 0 0-1.4.8z"/>`,
-  pause: `<rect ${F} x="6" y="4.5" width="4" height="15" rx="1.2"/><rect ${F} x="14" y="4.5" width="4" height="15" rx="1.2"/>`,
-  prev: `<path ${F} d="M19 6v12a.8.8 0 0 1-1.2.7L9.6 12.7a.8.8 0 0 1 0-1.4l8.2-6a.8.8 0 0 1 1.2.7z"/><path d="M6 5.5v13" stroke-width="2.2"/>`,
-  next: `<path ${F} d="M5 6v12a.8.8 0 0 0 1.2.7l8.2-6a.8.8 0 0 0 0-1.4l-8.2-6A.8.8 0 0 0 5 6z"/><path d="M18 5.5v13" stroke-width="2.2"/>`,
+  play: '<path d="M8 5.5v13l10.5-6.5z"/>',
+  pause: '<path d="M8.5 5.5v13M15.5 5.5v13"/>',
+  prev: '<path d="M18 6.5v11L9.5 12zM6 6v12"/>',
+  next: '<path d="M6 6.5v11l8.5-5.5zM18 6v12"/>',
   shuffle: '<path d="M3 7h3.4c2 0 3.2 1 4.3 2.7l2.6 4.6c1 1.7 2.3 2.7 4.3 2.7H21M3 17h3.4c1.3 0 2.3-.4 3.1-1.2M14.5 8.2C15.3 7.4 16.2 7 17.6 7H21M18 4l3 3-3 3M18 14l3 3-3 3"/>',
   repeat: '<path d="M17 2.5 20.5 6 17 9.5"/><path d="M3.5 11.5V10a4 4 0 0 1 4-4h13"/><path d="M7 21.5 3.5 18 7 14.5"/><path d="M20.5 12.5V14a4 4 0 0 1-4 4h-13"/>',
   repeat1: '<path d="M17 2.5 20.5 6 17 9.5"/><path d="M3.5 11.5V10a4 4 0 0 1 4-4h13"/><path d="M7 21.5 3.5 18 7 14.5"/><path d="M20.5 12.5V14a4 4 0 0 1-4 4h-13"/><path d="M11 10.6l1.4-.9v5"/>',
@@ -47,7 +47,7 @@ const ICONS = {
   folderIn: '<path d="M3.5 7.5a2 2 0 0 1 2-2h4l2 2.5h7a2 2 0 0 1 2 2V17a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z"/><path d="M12 11v5M9.5 13.5 12 16l2.5-2.5"/>',
   headphones: '<path d="M3.5 17v-4.5a8.5 8.5 0 0 1 17 0V17"/><rect x="3" y="14.5" width="4" height="6" rx="1.5"/><rect x="17" y="14.5" width="4" height="6" rx="1.5"/>'
 };
-const ic = name => `<svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[name] || ""}</svg>`;
+const ic = name => `<svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[name] || ""}</svg>`;
 const setIc = (el, name) => { if (el && el.dataset.icn !== name) { el.dataset.icn = name; el.innerHTML = ic(name); } };
 function applyIcons(root = document) { root.querySelectorAll("i[data-ic]").forEach(i => i.outerHTML = ic(i.dataset.ic)); }
 applyIcons();
@@ -55,23 +55,24 @@ applyIcons();
 /* ---------- Look: appearance, accent colour, visual quality ---------- */
 const PHONE = matchMedia("(max-width: 760px)");
 const ACCENTS = {
+  mono: { name: "Black & white", c: "#fafafa", c2: "#27272a", h: [0, 0], s: 0 },
   sunset: { name: "Sunset", c: "#f43f5e", c2: "#fbbf24", h: [345, 405], s: 90 },
   ocean: { name: "Ocean", c: "#3b82f6", c2: "#22d3ee", h: [220, 185], s: 90 },
   forest: { name: "Forest", c: "#10b981", c2: "#a3e635", h: [160, 85], s: 80 },
   grape: { name: "Grape", c: "#8b5cf6", c2: "#f0abfc", h: [265, 300], s: 85 },
   rose: { name: "Rose", c: "#ec4899", c2: "#fda4af", h: [325, 350], s: 85 },
-  mono: { name: "Mono", c: "#d4d4d8", c2: "#71717a", h: [0, 0], s: 0 }
 };
 const OLD_THEMES = ["grape", "sunset", "forest", "ocean", "rose"];   // earlier versions stored a number
+if (store.get("lookV", 1) < 2) { store.set("accent", "mono"); store.set("intro", "minimal"); store.set("lookV", 2); }   // v1.8: thin black & white look
 const LOOK = {
   mode: store.get("uiMode", "auto"),
-  accent: store.get("accent", OLD_THEMES[store.get("theme", 1)] || "sunset"),
+  accent: store.get("accent", "mono"),
   quality: store.get("quality", "auto"),
   lite: false, off: false
 };
 const slowDevice = () => PHONE.matches || matchMedia("(pointer: coarse)").matches || (navigator.hardwareConcurrency || 8) <= 4 || (navigator.deviceMemory || 8) <= 4;
 function applyLook() {
-  if (!ACCENTS[LOOK.accent]) LOOK.accent = "sunset";
+  if (!ACCENTS[LOOK.accent]) LOOK.accent = "mono";
   const light = LOOK.mode === "light" || (LOOK.mode === "auto" && matchMedia("(prefers-color-scheme: light)").matches);
   const root = document.documentElement;
   root.dataset.mode = light ? "light" : "dark";
@@ -80,7 +81,7 @@ function applyLook() {
   LOOK.lite = LOOK.quality === "lite" || (LOOK.quality === "auto" && slowDevice());
   document.body.classList.toggle("lite", LOOK.lite);
   document.body.classList.toggle("viz-off", LOOK.off);
-  const meta = document.querySelector('meta[name="theme-color"]'); if (meta) meta.content = light ? "#f5f5f7" : "#0e0e11";
+  const meta = document.querySelector('meta[name="theme-color"]'); if (meta) meta.content = light ? "#ffffff" : "#000000";
   store.set("uiMode", LOOK.mode); store.set("accent", LOOK.accent); store.set("quality", LOOK.quality);
   document.querySelectorAll("#setMode button").forEach(b => b.classList.toggle("active", b.dataset.v === LOOK.mode));
   document.querySelectorAll("#setQuality button").forEach(b => b.classList.toggle("active", b.dataset.v === LOOK.quality));
@@ -101,10 +102,10 @@ const it = $(".intro-title");
 it.innerHTML = [...C.name].map((ch, i) => `<span style="animation-delay:${0.6 + i * 0.08}s">${ch === " " ? "&nbsp;" : ch}</span>`).join("");
 
 /* ---------- Animated intro (5 styles, chosen in config.js) ---------- */
-const INTROS = ["rings", "equalizer", "wave", "glitch", "burst"];
+const INTROS = ["minimal", "rings", "equalizer", "wave", "glitch", "burst"];
 const qs = new URLSearchParams(location.search).get("intro");
 const savedIntro = store.get("intro", C.intro);
-const introStyle = INTROS.includes(qs) ? qs : INTROS[+qs - 1] || (INTROS.includes(savedIntro) ? savedIntro : "rings");
+const introStyle = INTROS.includes(qs) ? qs : INTROS[+qs - 1] || (INTROS.includes(savedIntro) ? savedIntro : "minimal");
 $("#intro").classList.add("intro-" + introStyle);
 const icv = $("#introCanvas"), ix = icv.getContext("2d");
 let introRunning = true, introT0 = null;
@@ -113,6 +114,14 @@ const dots = Array.from({ length: 90 }, () => ({ a: R() * 6.28, r: R() * 600 + 4
 const parts = Array.from({ length: 260 }, () => { const a = R() * 6.28, d = 0.6 + R() * 0.8; return { a, d, s: 0.6 + R() * 0.8, h: R() * 50 - 10, z: 1 + R() * 2.5 }; });
 const hue = x => `${(350 + x) % 360}`;
 const INTRO_DRAW = {
+  minimal(t, w, h, k, cx, cy) {   // one thin line draws a heartbeat under the logo, then fades
+    const y = h * 0.88, span = Math.min(w * 0.7, 520 * k), x0 = cx - span / 2, p = Math.min(1, t / 1400);
+    ix.lineWidth = 1.2 * k; ix.strokeStyle = `rgba(255,255,255,${0.75 - Math.max(0, (t - 2600) / 4000)})`; ix.lineJoin = ix.lineCap = "round";
+    ix.beginPath(); ix.moveTo(x0, y);
+    const pts = [[0.38, 0], [0.44, -38], [0.5, 34], [0.56, -14], [0.6, 0], [1, 0]];
+    for (const [fx, dy] of pts) { const x = x0 + span * Math.min(fx, p); ix.lineTo(x, y + (fx <= p ? dy * k : 0)); if (fx > p) break; }
+    ix.stroke();
+  },
   rings(t, w, h, k, cx, cy) {
     for (let i = 0; i < 48; i++) {
       const ang = (i / 48) * Math.PI * 2, amp = 30 + Math.sin(t / 300 + i * 0.7) * 20 + Math.sin(t / 170 + i) * 10;
@@ -505,7 +514,7 @@ const Srv = (() => {
   async function viewAccount() {
     try { const me = await call("me"); cfg.user = me.user; store.set("server", cfg); } catch { return; }
     const u = cfg.user;
-    B().innerHTML = `<div class="srv-me"><span class="avatar" style="background:hsl(${hueOf(u.name)},60%,40%)">${esc(u.name[0].toUpperCase())}</span>
+    B().innerHTML = `<div class="srv-me"><span class="avatar">${esc(u.name[0].toUpperCase())}</span>
         <span><b>${esc(u.name)}</b><small>${u.admin ? "Admin" : u.upload ? "Family · can add music" : "Family"} · ${esc(cfg.name || "")}</small></span></div>
       <label class="switch srv-use"><input type="checkbox" id="srvUse"${cfg.use !== false ? " checked" : ""}> Show the <b>family library</b> on this device <small class="muted">(off = this device's own library)</small></label>
       <div class="srv-actions"><button class="btn" id="srvPw">Change password</button><button class="btn" id="srvOut">Sign out</button>${cfg.same ? "" : `<button class="btn" id="srvForget">Forget server</button>`}</div>
@@ -527,7 +536,7 @@ const Srv = (() => {
     if (!u.admin) return;
     const loadUsers = async () => {
       const r = await call("users"); adminUsers = r.users;
-      $("#srvUsers").innerHTML = adminUsers.map(x => `<li data-u="${esc(x.name)}"><span class="avatar" style="background:hsl(${hueOf(x.name)},60%,40%)">${esc(x.name[0].toUpperCase())}</span>
+      $("#srvUsers").innerHTML = adminUsers.map(x => `<li data-u="${esc(x.name)}"><span class="avatar">${esc(x.name[0].toUpperCase())}</span>
         <span class="un"><b>${esc(x.name)}</b><small>${x.admin ? "Admin" : "Family"} · ${x.lastSeen ? "last here " + new Date(x.lastSeen).toLocaleDateString() : "hasn't signed in yet"}</small></span>
         <label class="switch" title="Can add music"><input type="checkbox" data-up${x.upload ? " checked" : ""}${x.admin ? " disabled" : ""}> 🎵＋</label>
         ${x.name === u.name ? "" : `<button class="btn" data-pw>Reset password</button><button class="btn" data-del title="Remove">✕</button>`}</li>`).join("");
@@ -880,7 +889,7 @@ function cover(list, p, big) {
   if (arts.length >= 4) return `<div class="${cls} mosaic">${arts.slice(0, 4).map(u => `<img src="${u}" alt="" loading="lazy" decoding="async">`).join("")}</div>`;
   if (arts.length) return `<div class="${cls}"><img src="${arts[0]}" alt="" loading="lazy" decoding="async"></div>`;
   const h = hueOf(p.id || p.name);
-  return `<div class="${cls} blank" style="background:linear-gradient(135deg,hsl(${h},70%,45%),hsl(${(h + 50) % 360},80%,30%))">${ic(p.icon || "note")}</div>`;
+  return `<div class="${cls} blank">${ic(p.icon || "note")}</div>`;
 }
 const card = (p, act, extra = "") => { const l = listOf(p); return `<button class="card" data-act="${act}" data-id="${esc(p.id)}">${cover(l, p)}<div class="cn">${esc(p.name)}</div><div class="cs">${extra || (p.ro ? "👪 " + esc(p.owner) + " · " : (p.shared ? "👪 Shared · " : "") + (Srv.hasLink(p) ? "🔗 " : "")) + plural(l.length, "song")}</div></button>`; };
 const head = (title, list, extra = "") => `<div class="pl-btns-row"><span class="muted">${plural(list.length, "song")}${list.length ? ", " + mins(list.reduce((a, s) => a + (s.duration || 0), 0)) : ""}</span>
@@ -927,8 +936,8 @@ function markPlaying() {
   });
 }
 let curList = [];
-const folderBg = f => { const h = hueOf(f.id); return `background:linear-gradient(135deg,hsl(${h},55%,42%),hsl(${(h + 40) % 360},65%,26%))`; };
-const folderCard = f => `<button class="card" data-act="open-folder" data-id="${esc(f.id)}"><div class="cover blank folder-cov" style="${folderBg(f)}">${ic("folder")}</div><div class="cn">${esc(f.name)}</div><div class="cs">Folder · ${plural(inFolder(f).length, "playlist")}</div></button>`;
+const folderBg = () => "";
+const folderCard = f => `<button class="card" data-act="open-folder" data-id="${esc(f.id)}"><div class="cover blank folder-cov">${ic("folder")}</div><div class="cn">${esc(f.name)}</div><div class="cs">Folder · ${plural(inFolder(f).length, "playlist")}</div></button>`;
 const newTiles = inside => `<button class="card" data-act="new-pl"><div class="cover blank plus">${ic("plus")}</div><div class="cn">New Playlist</div><div class="cs">&nbsp;</div></button>` +
   (inside ? "" : `<button class="card" data-act="new-folder"><div class="cover blank plus">${ic("folder")}</div><div class="cn">New Folder</div><div class="cs">Group playlists</div></button>`) +
   `<button class="card" data-act="import-folder" title="Make a playlist from a folder of music on this device"><div class="cover blank plus">${ic("folderIn")}</div><div class="cn">Import Folder</div><div class="cs">Folder → playlist</div></button>`;
@@ -963,7 +972,7 @@ function render() {
   } else if (t === "folder") {
     const f = getFolder(view.id); if (!f) { view = { type: "playlists" }; return render(); }
     const pls = inFolder(f); curList = folderSongs(f);
-    h = back("playlists", "Playlists") + `<div class="pl-head"><div class="cover big blank folder-cov" style="${folderBg(f)}">${ic("folder")}</div><div class="pl-info"><h2>${esc(f.name)}</h2>
+    h = back("playlists", "Playlists") + `<div class="pl-head"><div class="cover big blank folder-cov">${ic("folder")}</div><div class="pl-info"><h2>${esc(f.name)}</h2>
       <p class="muted">${plural(pls.length, "playlist")}</p><div class="pl-tools"><button class="btn icon" data-act="folder-more" title="More">⋯</button></div></div></div>` +
       head(f.name, curList) + `<div class="grid">${newTiles(true)}${pls.map(p => card(p, "open-pl")).join("")}</div>` +
       (pls.length ? "" : `<p class="muted pad">This folder is empty. Make a playlist here, or open any playlist and use <b>⋯ → Move to folder</b>.</p>`);
@@ -986,7 +995,7 @@ function render() {
   } else if (t === "artists") {
     const m = new Map(); songs.forEach(s => { if (!m.has(s.artist)) m.set(s.artist, []); m.get(s.artist).push(s); });
     h = `<ul class="links">${[...m].sort((a, b) => a[0].localeCompare(b[0])).map(([n, l]) => { const a = l.find(s => s.art);
-      return `<li><button data-act="open-artist" data-name="${esc(n)}"><span class="avatar" style="${a ? "" : `background:hsl(${hueOf(n)},60%,40%)`}">${a ? `<img src="${artUrl(a)}" alt="" loading="lazy" decoding="async">` : esc(n[0] || "?")}</span><span class="ln">${esc(n)}</span><span class="muted">${plural(l.length, "song")}</span><span class="chev">${ic("chev")}</span></button></li>`; }).join("")}</ul>`;
+      return `<li><button data-act="open-artist" data-name="${esc(n)}"><span class="avatar">${a ? `<img src="${artUrl(a)}" alt="" loading="lazy" decoding="async">` : esc(n[0] || "?")}</span><span class="ln">${esc(n)}</span><span class="muted">${plural(l.length, "song")}</span><span class="chev">${ic("chev")}</span></button></li>`; }).join("")}</ul>`;
   } else if (t === "artist") {
     curList = songs.filter(s => s.artist === view.name).sort((a, b) => a.album.localeCompare(b.album) || a.title.localeCompare(b.title));
     h = back("artists", "Artists") + `<h2 class="vh">${esc(view.name)}</h2>` + head(view.name, curList) + songsHtml(curList);
@@ -1766,7 +1775,7 @@ function draw(t) {
   const dpr = Math.min(devicePixelRatio || 1, LOOK.lite ? 1 : 2), W = Math.round(cv.clientWidth * dpr), H = Math.round(cv.clientHeight * dpr);
   if (!W || !H) return;
   if (cv.width !== W || cv.height !== H) { cv.width = W; cv.height = H; }
-  const A = ACCENTS[LOOK.accent] || ACCENTS.sunset, [h1, h2] = A.h, sat = A.s;
+  const A = ACCENTS[LOOK.accent] || ACCENTS.mono, [h1, h2] = A.h, sat = A.s;
   const mini = cv.parentElement.id === "player", m = mini ? (mode === "wave" ? "wave" : "bars") : mode;
   if (mini) g.clearRect(0, 0, W, H);
   else { const trail = m === "galaxy" || m === "tunnel" ? 0.22 : 0.35; g.fillStyle = `rgba(5,5,13,${trail})`; g.fillRect(0, 0, W, H); }
@@ -1781,12 +1790,13 @@ function draw(t) {
       const idx = Math.floor(Math.pow(i / n, 1.7) * freq.length * 0.7);
       const v = freq[idx] / 255, bh = v * H * 0.85;
       const gr = g.createLinearGradient(0, H, 0, H - bh); gr.addColorStop(0, col(0)); gr.addColorStop(1, col(1, 1, 70));
-      g.fillStyle = gr; g.fillRect(i * bw + 1, H - bh, bw - 2, bh);
-      g.fillStyle = col(i / n, 0.25); g.fillRect(i * bw + 1, H - bh - 6 * dpr, bw - 2, 3 * dpr);
+      const lw = Math.max(1, bw * 0.28);
+      g.fillStyle = gr; g.fillRect(i * bw + (bw - lw) / 2, H - bh, lw, bh);
+      g.fillStyle = col(i / n, 0.5); g.fillRect(i * bw + (bw - lw) / 2, H - bh - 5 * dpr, lw, 1.5 * dpr);
     }
   } else if (m === "wave") {
     for (let k = 0; k < 3; k++) {
-      g.beginPath(); g.lineWidth = (4 - k) * dpr; g.strokeStyle = col(k / 2, 1 - k * 0.3, 65);
+      g.beginPath(); g.lineWidth = (1.6 - k * 0.4) * dpr; g.strokeStyle = col(k / 2, 1 - k * 0.3, 65);
       g.shadowBlur = 20 * dpr; g.shadowColor = col(k / 2);
       for (let i = 0; i < wave.length; i += 4) {
         const x = i / wave.length * W, y = cy + (wave[i] - 128) / 128 * H * (0.45 - k * 0.1) * (1 + k * 0.2);
@@ -1800,7 +1810,7 @@ function draw(t) {
     g.save(); g.translate(cx, cy); g.rotate(t / 6000);
     for (let i = 0; i < n; i++) {
       const v = freq[Math.floor(i / n * freq.length * 0.5)] / 255, a = i / n * Math.PI * 2, L = v * Math.min(W, H) * 0.3;
-      g.strokeStyle = col(Math.abs(Math.sin(a)), 0.9); g.lineWidth = 3 * dpr;
+      g.strokeStyle = col(Math.abs(Math.sin(a)), 0.9); g.lineWidth = 1.2 * dpr;
       g.beginPath(); g.moveTo(Math.cos(a) * R, Math.sin(a) * R); g.lineTo(Math.cos(a) * (R + L), Math.sin(a) * (R + L)); g.stroke();
     }
     g.restore();
@@ -1819,7 +1829,7 @@ function draw(t) {
       const p = ((k / 14) + t / 4000) % 1, v = freq[k * 12] / 255;
       const s = Math.pow(p, 2) * Math.max(W, H) * (1 + v * 0.4);
       g.save(); g.translate(cx, cy); g.rotate(p * 2 + t / 3000);
-      g.strokeStyle = col(p, 0.2 + p * 0.8); g.lineWidth = (1 + p * 6 + beat * 4) * dpr;
+      g.strokeStyle = col(p, 0.2 + p * 0.8); g.lineWidth = (0.6 + p * 1.6 + beat) * dpr;
       g.beginPath(); for (let j = 0; j <= 6; j++) { const a = j / 6 * Math.PI * 2; g.lineTo(Math.cos(a) * s / 2, Math.sin(a) * s / 2); } g.stroke();
       g.restore();
     }

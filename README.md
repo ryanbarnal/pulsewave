@@ -28,7 +28,7 @@
 | `web/` | The app itself (HTML/CSS/JS). Served as the website and bundled into the desktop app. |
 | `web/config.js` | App name, tagline and credit. Change the name here. |
 | `main.js` | Electron desktop wrapper |
-| `logos/` | The 5 logo options (option 2 is in use) |
+| `logos/` | The 5 logo options (earlier colour options); `logos/mono/` has the thin black & white set (A is in use) |
 | `.github/workflows/pages.yml` | Publishes `web/` to pulsewave.ryanbarnal.com |
 | `.github/workflows/build.yml` | Builds the Windows and Mac installers and attaches them to a GitHub Release |
 
