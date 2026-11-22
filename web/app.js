@@ -200,8 +200,8 @@ requestAnimationFrame(introLoop);
 const audio = new Audio();
 audio.crossOrigin = "anonymous";   // lets the visualizer/equalizer work on songs streamed from the family server
 audio.preload = "metadata";
-if (store.get("karaokeV", 1) < 2) { store.set("karaoke", true); store.set("karaokeV", 2); }   // v1.9: karaoke on by default
-let ctx, analyser, filters = [], bass, pan, master, freq, wave, kNodes = null, karaoke = store.get("karaoke", true);
+if (store.get("karaokeV", 1) < 3) { store.set("karaoke", false); store.set("karaokeV", 3); }   // v1.9.1: karaoke off by default (1.9.0 had switched it on)
+let ctx, analyser, filters = [], bass, pan, master, freq, wave, kNodes = null, karaoke = store.get("karaoke", false);
 // Voice detector: energy in the voice band (250–3500 Hz) that sits in the centre of the stereo mix
 let midAn = null, sideAn = null, mBuf, sBuf, vAvg = -60, voiceOn = false, voiceLevel = 0;
 function detectVoice() {

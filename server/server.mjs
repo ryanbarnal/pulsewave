@@ -10,7 +10,7 @@ import { fileURLToPath } from "node:url";
 import { parseFile } from "music-metadata";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const VERSION = "1.6.0";
+const VERSION = "1.6.1";
 const PORT = +(process.env.PORT || 8095);
 const MUSIC_DIR = path.resolve(process.env.MUSIC_DIR || "/music");
 const DATA_DIR = path.resolve(process.env.DATA_DIR || "/data");
