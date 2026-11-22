@@ -200,7 +200,8 @@ requestAnimationFrame(introLoop);
 const audio = new Audio();
 audio.crossOrigin = "anonymous";   // lets the visualizer/equalizer work on songs streamed from the family server
 audio.preload = "metadata";
-let ctx, analyser, filters = [], bass, pan, master, freq, wave, kNodes = null, karaoke = store.get("karaoke", false);
+if (store.get("karaokeV", 1) < 2) { store.set("karaoke", true); store.set("karaokeV", 2); }   // v1.9: karaoke on by default
+let ctx, analyser, filters = [], bass, pan, master, freq, wave, kNodes = null, karaoke = store.get("karaoke", true);
 // Voice detector: energy in the voice band (250–3500 Hz) that sits in the centre of the stereo mix
 let midAn = null, sideAn = null, mBuf, sBuf, vAvg = -60, voiceOn = false, voiceLevel = 0;
 function detectVoice() {
@@ -264,6 +265,8 @@ function initAudio() {
   // "playback" = a bigger sound buffer, meant for music; the default is tuned for games and crackles more easily
   const AC = window.AudioContext || window.webkitAudioContext;
   try { ctx = new AC({ latencyHint: "playback" }); } catch { ctx = new AC(); }
+  // phones pause the sound engine for calls, other apps or the lock screen: resume as soon as we may
+  ctx.onstatechange = () => { if (ctx.state !== "running" && ctx.state !== "closed" && !audio.paused) ctx.resume().catch(() => {}); };
   const src = ctx.createMediaElementSource(audio);
   filters = BANDS.map((f, i) => {
     const b = ctx.createBiquadFilter();
@@ -715,15 +718,16 @@ async function importFolder(files) {
 }
 
 /* --- playback queue --- */
+let shufPlayed = new Set(), playedStack = [];
 function playList(list, i = 0, shuf = false) {
   if (!list.length) return;
-  tracks = list.slice();
+  tracks = list.slice(); shufPlayed = new Set(); playedStack = [];
   if (shuf) { shuffle = true; syncModes(); i = Math.floor(Math.random() * tracks.length); }
   load(i, true);
 }
 function load(i, play) {
   if (!tracks[i]) return;
-  cur = i; audio.preload = tracks[i].remote ? "auto" : "metadata"; audio.src = srcUrl(tracks[i]);
+  cur = i; shufPlayed.add(tracks[i]); audio.preload = tracks[i].remote ? "auto" : "metadata"; audio.src = srcUrl(tracks[i]);
   if (tracks[i].remote) setTimeout(() => Srv.prepare(tracks[i + 1] || (repeat === "all" ? tracks[0] : null)), 1500); setMeta(); if (view.type === "queue") render(); else markPlaying();
   tracks[i].plays = (tracks[i].plays || 0) + 1; tracks[i].lastPlayed = Date.now(); saveSong(tracks[i]);
   Lyrics.load(tracks[i]);
@@ -748,21 +752,53 @@ function setMeta() {
       artwork: [t.art ? { src: artUrl(t) } : { src: "icons/icon-512.png", sizes: "512x512", type: "image/png" }] });
   }
 }
-function playNow() { initAudio(); ctx.resume(); audio.play().catch(() => {}); }
+function playNow() {
+  initAudio(); ctx.resume().catch(() => {});
+  audio.play().catch(e => { if (e && e.name === "NotAllowedError") { setIc($("#playBtn"), "play"); setIc($("#miniPlay"), "play"); toast("Tap play to continue"); } });
+}
 function toggle() {
   if (cur === -1) { if (tracks.length) load(0, true); else if (songs.length) playList(songs); else $("#fileInput").click(); return; }
   audio.paused ? playNow() : audio.pause();
 }
-function next(auto) {
+function pickShuffle() {
+  const left = []; tracks.forEach((t, i) => { if (i !== cur && !shufPlayed.has(t)) left.push(i); });
+  return left.length ? left[Math.floor(Math.random() * left.length)] : -1;
+}
+// When a list ends: keep playing other songs from the library (Settings → "Keep playing")
+function keepPlaying() {
+  if (!store.get("autoplay", true)) return false;
+  const inQueue = new Set(tracks), pool = songs.filter(s => !inQueue.has(s));
+  if (!pool.length) return false;
+  for (let i = pool.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [pool[i], pool[j]] = [pool[j], pool[i]]; }
+  tracks.push(...pool.slice(0, 25));
+  toast("Keep playing: more songs from your library");
+  if (view.type === "queue") render();
+  load(cur + 1, true);
+  return true;
+}
+function endOfList() { audio.pause(); audio.currentTime = 0; toast("That's the end of the list"); }
+function next(auto, skip) {
   if (!tracks.length) return;
-  if (auto && repeat === "one") { audio.currentTime = 0; return playNow(); }
+  if (auto && !skip && repeat === "one") { audio.currentTime = 0; return playNow(); }
   let n;
-  if (shuffle && tracks.length > 1) { do n = Math.floor(Math.random() * tracks.length); while (n === cur); }
-  else n = cur + 1;
-  if (n >= tracks.length) { if (auto && repeat === "off") { audio.pause(); audio.currentTime = 0; return; } n = 0; }
+  const pinned = tracks[cur + 1] && tracks[cur + 1]._next;     // "Play next" wins, even in shuffle
+  if (pinned) { delete tracks[cur + 1]._next; n = cur + 1; }
+  else if (shuffle && tracks.length > 1) {
+    n = pickShuffle();
+    if (n < 0) {                                              // every song has played once
+      if (repeat === "all" || !auto) { shufPlayed = new Set([tracks[cur]]); n = pickShuffle(); }
+      else return keepPlaying() || endOfList();
+    }
+  } else n = cur + 1;
+  if (n >= tracks.length) { if (auto && repeat === "off") return keepPlaying() || endOfList(); n = 0; }
+  if (tracks[cur]) playedStack.push(tracks[cur]);
   load(n, true);
 }
-function prev() { if (audio.currentTime > 3) { audio.currentTime = 0; return; } load(cur <= 0 ? tracks.length - 1 : cur - 1, true); }
+function prev() {
+  if (audio.currentTime > 3) { audio.currentTime = 0; return; }
+  if (shuffle && playedStack.length) { const s = playedStack.pop(), i = tracks.indexOf(s); if (i >= 0) return load(i, true); }
+  load(cur <= 0 ? tracks.length - 1 : cur - 1, true);
+}
 
 /* --- playlists --- */
 const SMART = [
@@ -861,7 +897,7 @@ function menu(anchor, items) {
 }
 function songMenu(btn, s, c) {
   const items = [
-    { label: "▶  Play next", fn: () => { if (cur === -1) return playList([s]); tracks.splice(cur + 1, 0, s); toast("Playing next"); render(); } },
+    { label: "▶  Play next", fn: () => { if (cur === -1) return playList([s]); s._next = true; tracks.splice(cur + 1, 0, s); toast("Playing next"); render(); } },
     { label: "≡  Add to queue", fn: () => { if (cur === -1) return playList([s]); tracks.push(s); toast("Added to queue"); render(); } },
     { label: "＋ Add to playlist…", fn: () => menu(btn, [{ label: "＋ New playlist…", fn: () => newPlaylist(s).then(render) }, playlists.length && "-",
         ...playlists.filter(editable).map(p => ({ label: (p.songIds.includes(s.id) ? "✓ " : "") + plLabel(p), fn: () => addToPlaylist(p, s) }))]) },
@@ -1079,6 +1115,31 @@ $("#playBtn").onclick = toggle; $("#nextBtn").onclick = () => next(false); $("#p
 audio.onplay = () => { setIc($("#playBtn"), "pause"); setIc($("#miniPlay"), "pause"); };
 audio.onpause = () => { setIc($("#playBtn"), "play"); setIc($("#miniPlay"), "play"); };
 audio.onended = () => next(true);
+let errTries = 0;
+audio.addEventListener("error", () => {
+  const t = tracks[cur]; if (!t || !audio.getAttribute("src")) return;
+  if (errTries++ < 1) {                                   // one retry (e.g. a dropped connection)
+    const at = audio.currentTime || 0;
+    setTimeout(() => { if (tracks[cur] !== t) return; audio.src = srcUrl(t); audio.addEventListener("loadedmetadata", () => { if (at) audio.currentTime = at; }, { once: true }); playNow(); }, 1200);
+    return;
+  }
+  errTries = 0; toast(`Couldn't play “${t.title}”, so it was skipped`); next(true, true);
+});
+audio.addEventListener("playing", () => { errTries = 0; });
+// Watchdog: if the music should be playing but time stands still, wake the sound engine, then reconnect
+let lastPos = -1, stuckFor = 0;
+setInterval(() => {
+  if (audio.paused || audio.ended || !tracks[cur]) { stuckFor = 0; return; }
+  if (audio.currentTime !== lastPos) { lastPos = audio.currentTime; stuckFor = 0; return; }
+  stuckFor += 3;
+  if (ctx && ctx.state !== "running") ctx.resume().catch(() => {});
+  if (stuckFor >= 15) {
+    stuckFor = 0; const t = tracks[cur], at = audio.currentTime;
+    toast("Reconnecting…"); audio.src = srcUrl(t);
+    audio.addEventListener("loadedmetadata", () => { if (at) audio.currentTime = at; }, { once: true }); playNow();
+  }
+}, 3000);
+document.addEventListener("visibilitychange", () => { if (!document.hidden && ctx && ctx.state !== "running" && !audio.paused) ctx.resume().catch(() => {}); });
 let waitT = 0, stalls = [];
 audio.addEventListener("waiting", () => {
   clearTimeout(waitT);
@@ -1109,7 +1170,7 @@ const syncModes = () => {
   $("#repeatBtn").title = `Repeat: ${repeat} (R)`;
   store.set("shuffle", shuffle); store.set("repeat", repeat);
 };
-$("#shuffleBtn").onclick = () => { shuffle = !shuffle; syncModes(); };
+$("#shuffleBtn").onclick = () => { shuffle = !shuffle; if (shuffle) shufPlayed = new Set(tracks[cur] ? [tracks[cur]] : []); syncModes(); };
 $("#repeatBtn").onclick = () => { repeat = { off: "all", all: "one", one: "off" }[repeat]; syncModes(); };
 syncModes();
 ["#fileInput", "#fileInput2"].forEach(s => $(s).onchange = e => { addFiles(e.target.files); e.target.value = ""; });
@@ -1871,6 +1932,7 @@ addEventListener("keydown", e => {
   dots.onclick = e => { const b = e.target.closest("button"); if (b) { LOOK.accent = b.dataset.v; applyLook(); } };
   $("#setMode").onclick = e => { const b = e.target.closest("button"); if (b) { LOOK.mode = b.dataset.v; applyLook(); } };
   $("#setQuality").onclick = e => { const b = e.target.closest("button"); if (b) { LOOK.quality = b.dataset.v; applyLook(); } };
+  const ap = $("#setAutoplay"); ap.checked = store.get("autoplay", true); ap.onchange = () => store.set("autoplay", ap.checked);
   const sq = $("#setStream"), markSq = () => sq.querySelectorAll("button").forEach(b => b.classList.toggle("active", b.dataset.v === store.get("streamQ", "auto")));
   sq.onclick = e => { const b = e.target.closest("button"); if (b) { store.set("streamQ", b.dataset.v); markSq(); toast("Applies from the next song"); } };
   markSq();
