@@ -11,5 +11,5 @@ window.APP_CONFIG = {
   familyServer: "https://media.ryanbarnal.com",
   site: "https://pulsewave.ryanbarnal.com/",
   // Where people ask for a desktop activation key (shown on activate.html), e.g. "mailto:you@example.com" or a Messenger link
-  keyContact: ""
+  keyContact: "mailto:contact@ryanbarnal.com"
 };
