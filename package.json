@@ -1,7 +1,7 @@
 {
   "name": "pulsewave",
   "productName": "Pulsewave",
-  "version": "1.9.1",
+  "version": "1.10.0",
   "description": "Music player with visual effects and a 10-band equalizer",
   "author": "Ryan Ocbina Barnal",
   "license": "GPL-3.0-only",
@@ -22,6 +22,7 @@
     "copyright": "\u00a9 2026 Ryan Ocbina Barnal",
     "files": [
       "main.js",
+      "preload.js",
       "web/**/*",
       "!web/CNAME"
     ],
@@ -70,6 +71,24 @@
         "provider": "github",
         "owner": "ryanbarnal",
         "repo": "pulsewave"
+      }
+    ],
+    "fileAssociations": [
+      {
+        "ext": [
+          "mp3",
+          "m4a",
+          "aac",
+          "flac",
+          "wav",
+          "ogg",
+          "oga",
+          "opus"
+        ],
+        "name": "Audio file",
+        "description": "Audio file",
+        "role": "Viewer",
+        "mimeType": "audio/mpeg"
       }
     ]
   },

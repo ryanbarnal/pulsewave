@@ -25,5 +25,33 @@
       "type": "image/png",
       "purpose": "maskable"
     }
-  ]
+  ],
+  "file_handlers": [
+    {
+      "action": "./",
+      "accept": {
+        "audio/mpeg": [
+          ".mp3"
+        ],
+        "audio/mp4": [
+          ".m4a",
+          ".aac"
+        ],
+        "audio/flac": [
+          ".flac"
+        ],
+        "audio/wav": [
+          ".wav"
+        ],
+        "audio/ogg": [
+          ".ogg",
+          ".oga",
+          ".opus"
+        ]
+      }
+    }
+  ],
+  "launch_handler": {
+    "client_mode": "focus-existing"
+  }
 }

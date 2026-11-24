@@ -571,6 +571,7 @@ const Srv = (() => {
 
 /* ---------- Library, playlists & queue (saved on this device) ---------- */
 let tracks = [], cur = -1, shuffle = store.get("shuffle", false), repeat = store.get("repeat", "off"); // tracks = the play queue ("Up Next")
+let libReadyDone; const libReadyP = new Promise(r => { libReadyDone = r; });
 let songs = [], playlists = [], folders = [], view = { type: store.get("libView", "playlists") }, query = "", rowCtx = null, libReady = false;
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 const clean = n => n.replace(/\.[^.]+$/, "").replace(/[_]+/g, " ");
@@ -599,6 +600,7 @@ const DB = (() => {
 // keep = true when applying a change that came from another device (don't re-stamp it)
 const syncChanged = () => { if (window.__pwSync) window.__pwSync.changed(); };
 const saveSong = (s, keep) => {
+  if (s.temp) return Promise.resolve();
   if (s.share) return Promise.resolve();
   if (s.remote) { if (s.lrc != null && s.lrc !== s._lrcSent) { s._lrcSent = s.lrc; Srv.putLyrics(s); } Srv.saveUser(); return Promise.resolve(); }
   const { url, artUrl, ...rec } = s; if (!keep) syncChanged(); return DB.put("songs", rec);
@@ -665,6 +667,43 @@ const getDuration = f => new Promise(res => {
   a.preload = "metadata"; a.onloadedmetadata = () => fin(a.duration); a.onerror = () => fin(0); setTimeout(() => fin(0), 6000); a.src = u;
 });
 
+async function songFromFile(f) {
+  const tags = await readTags(f), name = clean(f.name), m = name.split(" - ");
+  return {
+    id: uid(), fname: f.name, size: f.size, file: f, added: Date.now(), fav: false,
+    title: tags.TIT2 || (m.length > 1 ? m.slice(1).join(" - ").trim() : name),
+    artist: tags.TPE1 || (m.length > 1 ? m[0].trim() : "Unknown artist"),
+    album: tags.TALB || "", art: tags.art || null, duration: await getDuration(f),
+    year: (tags.TDRC || tags.TYER || "").slice(0, 4), genre: (tags.TCON || "").replace(/^\(\d+\)/, "")
+  };
+}
+const isAudioFile = f => (f.type || "").startsWith("audio/") || /\.(mp3|wav|ogg|oga|m4a|aac|flac|opus|webm|aiff?|alac)$/i.test(f.name);
+// Songs opened from the computer (double-click, "Open with", drag onto the app icon): play now, don't copy into the library
+async function openFiles(items) {
+  items = items.filter(x => x.file && isAudioFile(x.file));
+  if (!items.length) return;
+  await libReadyP;
+  if (!$("#intro").classList.contains("hidden")) enterApp();
+  const list = [];
+  for (const { file, lrc } of items) {
+    const known = !Srv.on() && songs.find(x => x.fname === file.name && x.size === file.size);
+    if (known) { list.push(known); continue; }
+    const s = await songFromFile(file); s.temp = true; if (lrc) s.lrc = lrc;
+    list.push(s);
+  }
+  playList(list, 0);
+  if (PHONE.matches) setSection("np");
+  toast(list.length > 1 ? `Playing ${list.length} songs from your computer` : `Playing “${list[0].title}”`);
+}
+// "Add to library" for a song opened from the computer
+async function keepSong(s) {
+  if (!s.temp) return true;
+  if (Srv.on()) { const up = await Srv.upload([s.file]); if (up.length) toast("Added to the family library. Find it in Songs"); return false; }
+  const dup = songs.find(x => x.fname === s.fname && x.size === s.size);
+  if (dup) { tracks = tracks.map(t => t === s ? dup : t); toast("It's already in your library"); return false; }
+  delete s.temp; songs.push(s); await saveSong(s); toast(`Added “${s.title}” to your library`); render();
+  return true;
+}
 async function addFiles(files, quiet, folder) {
   if (Srv.on()) { const up = await Srv.upload(files, folder); if (up.length && !quiet && cur === -1) playList(up, 0); return up; }
   files = [...files];
@@ -675,17 +714,7 @@ async function addFiles(files, quiet, folder) {
   if (list.length) toast(`Adding ${plural(list.length, "song")}…`);
   for (const f of list) {
     let s = songs.find(x => x.fname === f.name && x.size === f.size);
-    if (!s) {
-      const tags = await readTags(f), name = clean(f.name), m = name.split(" - ");
-      s = {
-        id: uid(), fname: f.name, size: f.size, file: f, added: Date.now(), fav: false,
-        title: tags.TIT2 || (m.length > 1 ? m.slice(1).join(" - ").trim() : name),
-        artist: tags.TPE1 || (m.length > 1 ? m[0].trim() : "Unknown artist"),
-        album: tags.TALB || "", art: tags.art || null, duration: await getDuration(f),
-        year: (tags.TDRC || tags.TYER || "").slice(0, 4), genre: (tags.TCON || "").replace(/^\(\d+\)/, "")
-      };
-      songs.push(s);
-    }
+    if (!s) { s = await songFromFile(f); songs.push(s); }
     const l = lrcs.find(l => base(l.name) === base(f.name)); if (l) s.lrc = await l.text();
     await saveSong(s); added.push(s);
   }
@@ -842,12 +871,14 @@ async function newPlaylist(withSong, folderId) {
   playlists.push(p); await savePl(p); toast(`Created “${p.name}”`);
   return p;
 }
-function addToPlaylist(p, s) {
+async function addToPlaylist(p, s) {
+  if (s.temp && !(await keepSong(s))) return;
   if (p.songIds.includes(s.id)) return toast(`Already in “${p.name}”`);
   p.songIds.push(s.id); savePl(p); toast(`Added to “${p.name}”`); render();
 }
 function movePl(p, a, b) { if (a === b) return; const [x] = p.songIds.splice(a, 1); p.songIds.splice(b, 0, x); savePl(p); render(); }
-function toggleFav(s) {
+async function toggleFav(s) {
+  if (s.temp && !(await keepSong(s))) return;
   s.fav = !s.fav; s.mtime = Date.now(); saveSong(s); toast(s.fav ? "Added to Favorite Songs" : "Removed from Favorite Songs");
   if (view.type === "playlist" && view.id === "_fav") return render();
   V.querySelectorAll(".song").forEach(r => { if (rowCtx && rowCtx.list[+r.dataset.i] === s) { const b = r.querySelector(".fav"); if (b) { b.classList.toggle("on", s.fav); b.innerHTML = ic(s.fav ? "heartFill" : "heart"); } } });
@@ -910,7 +941,8 @@ function songMenu(btn, s, c) {
     c.i < c.pl.songIds.length - 1 && { label: "↓  Move down", fn: () => movePl(c.pl, c.i, c.i + 1) },
     { label: "Remove from this playlist", fn: () => { c.pl.songIds.splice(c.i, 1); savePl(c.pl); render(); } });
   if (c.queue) items.push("-", { label: "Remove from Up Next", fn: () => removeFromQueue(c.i) });
-  if (!s.remote) items.push("-", { label: "Delete from library", danger: true, fn: () => deleteSong(s) });
+  if (s.temp) items.unshift({ label: "＋ Add to library", fn: () => keepSong(s) }, "-");
+  else if (!s.remote) items.push("-", { label: "Delete from library", danger: true, fn: () => deleteSong(s) });
   else if (Srv.user() && Srv.user().admin) items.push("-", { label: "Remove from family library", danger: true, fn: () => deleteSong(s) });
   menu(btn, items);
 }
@@ -1106,7 +1138,18 @@ $("#folderInput").onchange = e => { importFolder(e.target.files); e.target.value
     const all = (await DB.all("playlists")).sort((a, b) => a.created - b.created);
     folders = all.filter(x => x.folder); playlists = all.filter(x => !x.folder);
   }
-  libReady = true; render();
+  libReady = true; render(); libReadyDone();
+  // Desktop app: songs double-clicked on the computer arrive here
+  if (window.pulsewaveDesktop) {
+    window.pulsewaveDesktop.onOpenFiles(list => openFiles(list.map(x => ({ file: new File([x.data], x.name, { type: x.type, lastModified: x.mtime }), lrc: x.lrc }))));
+    window.pulsewaveDesktop.ready();
+  }
+  // Installed web app (Chrome / Edge on a computer): "Open with → Pulsewave"
+  if ("launchQueue" in window) window.launchQueue.setConsumer(async p => {
+    if (!p.files || !p.files.length) return;
+    const files = await Promise.all(p.files.map(h => h.getFile().catch(() => null)));
+    openFiles(files.filter(Boolean).map(file => ({ file })));
+  });
 })();
 
 /* ---------- Controls ---------- */
