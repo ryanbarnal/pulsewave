@@ -41,7 +41,7 @@ body{font-weight:300}b,strong,h1,h3{font-weight:500}h1{font-weight:300;letter-sp
 <p>Open <b>Container Station → Applications → Create</b>. Name it <code>pulsewave</code> and paste this:</p>
 <pre><button class="copy" onclick="navigator.clipboard.writeText(this.nextElementSibling.textContent);this.textContent='Copied ✓'">Copy</button><code>services:
   pulsewave:
-    image: ghcr.io/ryanbarnal/pulsewave-server:1.6.2
+    image: ghcr.io/ryanbarnal/pulsewave-server:1.7.0
     container_name: pulsewave
     restart: unless-stopped
     ports:

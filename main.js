@@ -3,6 +3,50 @@ const { app, BrowserWindow, Menu, shell, dialog, ipcMain } = require("electron")
 const path = require("path");
 const fs = require("fs");
 const fsp = require("fs/promises");
+const crypto = require("crypto");
+
+/* ---------- 30-day free trial, then an activation key ----------
+   Keys are made on the family server (🏠 → Activation keys) and signed there.
+   This is only the PUBLIC half: it can check a key, never make one. */
+const LICENSE_PUBLIC_KEY = "__LICENSE_PUBLIC_KEY__";
+const TRIAL_DAYS = 30, DAY = 864e5;
+const nowMs = () => Date.now() + (!app.isPackaged && process.env.PULSEWAVE_TEST_DAYS ? +process.env.PULSEWAVE_TEST_DAYS * DAY : 0);
+const statePaths = () => [path.join(app.getPath("userData"), "state.json"), path.join(app.getPath("appData"), ".pulsewave-state")];
+function readState() {
+  const st = { first: Infinity, last: 0, key: null };
+  for (const p of statePaths()) { try { const s = JSON.parse(fs.readFileSync(p, "utf8")); st.first = Math.min(st.first, s.first || Infinity); st.last = Math.max(st.last, s.last || 0); st.key = st.key || s.key || null; } catch {} }
+  return st;
+}
+function writeState(st) { for (const p of statePaths()) { try { fs.writeFileSync(p, JSON.stringify(st)); } catch {} } }
+function checkKey(key) {
+  try {
+    const [tag, p, s] = String(key || "").replace(/\s+/g, "").split(".");
+    if (tag !== "PW1" || !p || !s) return null;
+    const pub = crypto.createPublicKey({ key: Buffer.from(LICENSE_PUBLIC_KEY, "base64"), format: "der", type: "spki" });
+    const payload = Buffer.from(p, "base64url");
+    if (!crypto.verify(null, payload, pub, Buffer.from(s, "base64url"))) return null;
+    const info = JSON.parse(payload.toString("utf8"));
+    return info && info.v === 1 && info.n ? info : null;
+  } catch { return null; }
+}
+function licenseStatus() {
+  const st = readState(), now = nowMs();
+  if (!isFinite(st.first)) st.first = now;
+  st.last = Math.max(st.last, now);              // turning the clock back doesn't add days
+  writeState(st);
+  const lic = st.key && checkKey(st.key);
+  if (lic) return { state: "active", name: lic.n };
+  const left = Math.max(0, Math.ceil(TRIAL_DAYS - (st.last - st.first) / DAY));
+  return { state: left > 0 ? "trial" : "expired", daysLeft: left, trialDays: TRIAL_DAYS };
+}
+ipcMain.handle("pw-license", () => licenseStatus());
+ipcMain.handle("pw-activate", (_e, key) => {
+  const lic = checkKey(key);
+  if (!lic) return { ok: false, error: "That key isn't valid. Copy the whole key, it starts with PW1." };
+  const st = readState(); if (!isFinite(st.first)) st.first = nowMs();
+  st.key = String(key).replace(/\s+/g, ""); writeState(st);
+  return { ok: true, name: lic.n };
+});
 
 // Opened from a double-clicked song: play straight away, no "Tap to start" needed
 app.commandLine.appendSwitch("autoplay-policy", "no-user-gesture-required");
@@ -48,7 +92,7 @@ function createWindow() {
     backgroundColor: "#0e0e11", title: "Pulsewave",
     icon: path.join(__dirname, "build", "icon.png"),
     autoHideMenuBar: true,
-    webPreferences: { contextIsolation: true, sandbox: true, preload: path.join(__dirname, "preload.js") }
+    webPreferences: { contextIsolation: true, sandbox: true, preload: path.join(__dirname, "preload.js"), devTools: !app.isPackaged }
   });
   rendererReady = false;
   mainWin.loadFile(path.join(__dirname, "web", "index.html"));
@@ -122,7 +166,9 @@ async function checkForUpdates(manual) {
 
 const menu = [
   ...(process.platform === "darwin" ? [{ role: "appMenu" }] : []),
-  { role: "fileMenu" }, { role: "viewMenu" }, { role: "windowMenu" },
+  { role: "fileMenu" },
+  { label: "View", submenu: [{ role: "reload" }, { type: "separator" }, { role: "resetZoom" }, { role: "zoomIn" }, { role: "zoomOut" }, { type: "separator" }, { role: "togglefullscreen" }] },
+  { role: "windowMenu" },
   { role: "help", submenu: [
     { label: "Pulsewave Manual", click: () => { const w = new BrowserWindow({ width: 900, height: 800, autoHideMenuBar: true, backgroundColor: "#0e0e11" }); w.loadFile(path.join(__dirname, "web", "help.html")); } },
     { label: "Check for Updates…", click: () => checkForUpdates(true) },

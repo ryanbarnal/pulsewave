@@ -1,0 +1,19 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Activate Pulsewave</title><link rel="icon" href="logo.svg">
+<style>body{margin:0;background:#0b0b1a;color:#eef0ff;font:16px/1.6 system-ui,sans-serif;text-align:center;padding:40px 16px}
+img{width:110px;border-radius:24%}h1{margin:12px 0 4px}.muted{color:#9aa0c3}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:16px;max-width:900px;margin:30px auto}
+.card{background:#141428;border-radius:16px;padding:22px}.btn{display:block;margin:10px 0;padding:11px;border-radius:999px;background:transparent;color:#fff;text-decoration:none;font-weight:600}
+a{color:#fbbf24}strong{color:#fff}body{font-weight:300}b,strong,h1,h3{font-weight:500}h1{font-weight:300;letter-spacing:.02em}section,nav,.card{border:1px solid #ffffff14}.btn{border:1px solid #fff!important;color:#fff!important;font-weight:400!important}.step{background:transparent!important;border:1px solid #fff;font-weight:400}.note{border-left:1px solid #fff!important}a{color:#fff}</style>
+<script src="config.js"></script></head><body>
+<img src="logo.svg" alt=""><h1>Activate Pulsewave</h1>
+<div class="grid" style="grid-template-columns:1fr;max-width:560px;text-align:left">
+<div class="card"><h2>Desktop app: 30 days free</h2><p>The Windows and Mac app is free for 30 days. After that it asks for an <b>activation key</b>. One key works on all your computers.</p></div>
+<div class="card"><h2>How to get a key</h2><p id="contact">Ask <b>Ryan Ocbina Barnal</b>, who made Pulsewave, for your key.</p>
+<p>Then open the desktop app → <b>Settings</b> (gear icon) → <b>Activation</b>, paste the key and press <b>Activate</b>. Or paste it on the screen that appears when the trial ends.</p></div>
+<div class="card"><h2>Free forever: the web app</h2><p>Pulsewave in your browser and on your phone stays free, with no trial and no key. <a class="btn" href="./">Open the web app</a></p></div>
+</div>
+<p class="muted">Created by <strong>Ryan Ocbina Barnal</strong></p>
+<script>
+const c = (window.APP_CONFIG || {}).keyContact;
+if (c) document.getElementById("contact").innerHTML = 'Ask <b>Ryan Ocbina Barnal</b> for your key: <a href="' + c.replace(/"/g, "") + '">' + c.replace(/^mailto:/, "").replace(/</g, "&lt;") + '</a>';
+</script></body></html>

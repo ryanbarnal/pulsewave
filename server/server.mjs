@@ -10,7 +10,7 @@ import { fileURLToPath } from "node:url";
 import { parseFile } from "music-metadata";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const VERSION = "1.6.2";
+const VERSION = "1.7.0";
 const PORT = +(process.env.PORT || 8095);
 const MUSIC_DIR = path.resolve(process.env.MUSIC_DIR || "/music");
 const DATA_DIR = path.resolve(process.env.DATA_DIR || "/data");
@@ -42,7 +42,8 @@ const db = {
   sessions: load("sessions", {}),    // sha256(token) -> { user, created, seen }
   library: load("library", { songs: {}, scannedAt: 0 }),
   hidden: load("hidden", {}),        // song id -> true (removed by admin)
-  shares: load("shares", {})         // listen-link id -> { owner, playlistId, created }
+  shares: load("shares", {}),        // listen-link id -> { owner, playlistId, created }
+  licenses: load("licenses", [])     // activation keys issued for the desktop app
 };
 const saveUsers = () => save("users", db.users);
 let sessT = 0; const saveSessions = () => { clearTimeout(sessT); sessT = setTimeout(() => save("sessions", db.sessions), 2000); };
@@ -229,6 +230,26 @@ function pruneCache() {
   } catch {} finally { pruning = false; }
 }
 
+/* ---------------- activation keys for the desktop app ----------------
+   The NAS keeps a private signing key (never leaves /data). Each key = details + signature.
+   The desktop app carries only the public key, so it can check keys offline but can't make them. */
+const LIC_FILE = path.join(DATA_DIR, "license-signing-key.pem");
+function licKeys() {
+  if (!fs.existsSync(LIC_FILE)) {
+    const { privateKey } = crypto.generateKeyPairSync("ed25519");
+    fs.writeFileSync(LIC_FILE, privateKey.export({ type: "pkcs8", format: "pem" }), { mode: 0o600 });
+    log("activation keys: new signing key created (back up the data folder!)");
+  }
+  const priv = crypto.createPrivateKey(fs.readFileSync(LIC_FILE));
+  return { priv, pub: crypto.createPublicKey(priv).export({ type: "spki", format: "der" }).toString("base64") };
+}
+const b64u = b => Buffer.from(b).toString("base64url");
+function makeKey(name, email) {
+  const body = { v: 1, n: name, e: email, d: new Date().toISOString().slice(0, 10) };
+  const payload = Buffer.from(JSON.stringify(body)), sig = crypto.sign(null, payload, licKeys().priv);
+  return { key: `PW1.${b64u(payload)}.${b64u(sig)}`, ...body };
+}
+
 /* ---------------- HTTP helpers ---------------- */
 function send(res, code, body, headers = {}) {
   const isObj = body && typeof body === "object" && !Buffer.isBuffer(body);
@@ -267,6 +288,8 @@ const safeName = n => String(n || "").replace(/[\/\\:*?"<>|\x00-\x1f]/g, "_").re
 /* ---------------- routes ---------------- */
 async function api(req, res, url) {
   const p = url.pathname.replace(/^\/api\//, ""), M = req.method, ip = ipOf(req);
+  // the public half is safe to share: it can only check keys, not make them
+  if (p === "license-public-key") return send(res, 200, { publicKey: licKeys().pub });
   if (p === "info") return send(res, 200, { pulsewaveServer: true, name: SERVER_NAME, version: VERSION, setup: Object.keys(db.users).length === 0, publicUrl: PUBLIC_URL || null, transcode: hasFfmpeg });
 
   if (p === "setup" && M === "POST") {
@@ -405,6 +428,20 @@ async function api(req, res, url) {
   if (p === "hidden" && M === "DELETE") {   // bring back everything the admin removed
     if (!me.admin) return err(res, 403, "Admins only");
     db.hidden = {}; save("hidden", db.hidden); return send(res, 200, { ok: true });
+  }
+
+  /* ----- admin: activation keys ----- */
+  if (p === "licenses") {
+    if (!me.admin) return err(res, 403, "Admins only");
+    if (M === "GET") return send(res, 200, { publicKey: licKeys().pub, licenses: db.licenses.slice().reverse() });
+    if (M === "POST") {
+      const b = await readJson(req), name = String(b.name || "").trim().slice(0, 60), email = String(b.email || "").trim().slice(0, 100);
+      if (!name) return err(res, 400, "Enter the person's name");
+      const k = makeKey(name, email);
+      db.licenses.push({ name, email, date: k.d, key: k.key, by: me.name }); save("licenses", db.licenses);
+      log(`activation key made for "${name}"`);
+      return send(res, 200, k);
+    }
   }
 
   /* ----- admin: family accounts ----- */

@@ -526,6 +526,11 @@ const Srv = (() => {
         <div class="srv-add"><b>Add a person</b><div class="srv-form row"><input id="nuName" placeholder="Name" autocomplete="off"><input id="nuPass" type="text" placeholder="Password (6+)" autocomplete="off"></div>
         <label class="switch"><input type="checkbox" id="nuUp"> Can add music</label> <label class="switch"><input type="checkbox" id="nuAdmin"> Admin</label>
         <button class="btn primary" id="nuGo">Add</button></div>
+        <h3>Activation keys (desktop app)</h3>
+        <p class="muted small">The desktop app is free for 30 days, then needs a key. Make one for each person. One key works on all their computers. The website and phone app stay free.</p>
+        <div class="srv-add"><div class="srv-form row"><input id="lkName" placeholder="Name" autocomplete="off"><input id="lkMail" type="text" placeholder="Email (optional)" autocomplete="off"></div>
+        <button class="btn primary" id="lkGo">Make key</button><div id="lkOut"></div></div>
+        <ul class="srv-users" id="lkList"></ul>
         <h3>Music library</h3><p class="muted" id="srvLib">…</p>
         <div class="srv-actions"><button class="btn" id="srvScan">Rescan music folder</button><button class="btn" id="srvUnhide">Restore removed songs</button></div>` : ""}`;
     $("#srvUse").onchange = async e => { cfg.use = e.target.checked; store.set("server", cfg); location.reload(); };
@@ -560,6 +565,22 @@ const Srv = (() => {
     const libInfo = async () => { try { const l = await call("library"); $("#srvLib").textContent = `${plural(l.songs.length, "song")} · last scanned ${l.scannedAt ? new Date(l.scannedAt).toLocaleString() : "never"}${l.scanning ? ` · scanning ${l.progress.done}/${l.progress.total}…` : ""}`; } catch {} };
     $("#srvScan").onclick = async () => { msg("Scanning the music folder… this can take a while the first time."); try { await call("rescan?wait=1", { method: "POST" }); await reload(); libInfo(); msg("Library updated ✓"); } catch (er) { msg(er.message, true); } };
     $("#srvUnhide").onclick = async () => { try { await call("hidden", { method: "DELETE" }); await reload(); libInfo(); msg("Removed songs are back ✓"); } catch (er) { msg(er.message, true); } };
+    const loadKeys = async () => {
+      try {
+        const r = await call("licenses");
+        $("#lkList").innerHTML = r.licenses.length ? r.licenses.map(l => `<li><span class="un"><b>${esc(l.name)}</b><small>${esc(l.email || "no email")} · ${esc(l.date)}</small></span><button class="btn" data-key="${esc(l.key)}">Copy key</button></li>`).join("") : '<li class="muted">No keys made yet.</li>';
+      } catch (er) { $("#lkList").innerHTML = `<li class="muted">${esc(er.message)}</li>`; }
+    };
+    $("#lkList").onclick = async e => { const b = e.target.closest("[data-key]"); if (b) { try { await navigator.clipboard.writeText(b.dataset.key); toast("Key copied"); } catch { await ask("Activation key", b.dataset.key, "Done"); } } };
+    $("#lkGo").onclick = async () => {
+      try {
+        const k = await call("licenses", { method: "POST", json: { name: $("#lkName").value, email: $("#lkMail").value } });
+        $("#lkOut").innerHTML = `<p class="small">Key for <b>${esc(k.n)}</b>. Send it to them; they paste it in the desktop app under Settings → Activation:</p><textarea readonly rows="3" style="width:100%;font:12px ui-monospace,monospace">${esc(k.key)}</textarea>`;
+        try { await navigator.clipboard.writeText(k.key); toast("Key made and copied"); } catch {}
+        $("#lkName").value = $("#lkMail").value = ""; loadKeys();
+      } catch (er) { msg(er.message, true); }
+    };
+    loadKeys();
     loadUsers().catch(er => msg(er.message, true)); libInfo();
   }
   $("#srvBtn").onclick = open;
@@ -683,6 +704,7 @@ async function openFiles(items) {
   items = items.filter(x => x.file && isAudioFile(x.file));
   if (!items.length) return;
   await libReadyP;
+  if (appLocked) { toast("Activate Pulsewave to play songs"); return; }
   if (!$("#intro").classList.contains("hidden")) enterApp();
   const list = [];
   for (const { file, lrc } of items) {
@@ -781,7 +803,9 @@ function setMeta() {
       artwork: [t.art ? { src: artUrl(t) } : { src: "icons/icon-512.png", sizes: "512x512", type: "image/png" }] });
   }
 }
+let appLocked = false;
 function playNow() {
+  if (appLocked) return;
   initAudio(); ctx.resume().catch(() => {});
   audio.play().catch(e => { if (e && e.name === "NotAllowedError") { setIc($("#playBtn"), "play"); setIc($("#miniPlay"), "play"); toast("Tap play to continue"); } });
 }
@@ -1949,7 +1973,7 @@ const help = v => $("#helpModal").classList.toggle("hidden", !v);
 $("#helpBtn").onclick = () => help(true); $("#helpClose").onclick = () => help(false);
 $("#helpModal").onclick = e => { if (e.target.id === "helpModal") help(false); };
 addEventListener("keydown", e => {
-  if (!$("#intro").classList.contains("hidden") || e.target.matches("input[type=text],input[type=search],select,textarea")) return;
+  if (appLocked || !$("#intro").classList.contains("hidden") || e.target.matches("input[type=text],input[type=search],select,textarea")) return;
   const k = e.key;
   if (k === " ") { e.preventDefault(); toggle(); }
   else if (k === "ArrowRight") { e.preventDefault(); e.shiftKey ? audio.currentTime += 10 : next(false); }
@@ -2011,6 +2035,41 @@ function updateMini() {
   $("#miniTitle").textContent = t.title; $("#miniSub").textContent = t.artist;
   const a = artUrl(t); if ($("#miniArt").getAttribute("src") !== a) $("#miniArt").src = a;
 }
+
+/* ---------- Desktop app: 30-day free trial, then activation (the web app stays free) ---------- */
+(() => {
+  const D = window.pulsewaveDesktop; if (!D || !D.license) return;
+  const KEY_PAGE = (C.site || "https://pulsewave.ryanbarnal.com/") + "activate.html";
+  $("#setLicRow").classList.remove("hidden");
+  const lock = on => {
+    appLocked = on; $("#lock").classList.toggle("hidden", !on);
+    if (on) { audio.pause(); $("#setModal").classList.add("hidden"); }
+  };
+  async function refresh(first) {
+    const st = await D.license.status();
+    if (st.state === "active") { $("#setLicText").innerHTML = `Activated for <b>${esc(st.name)}</b>. Thank you!`; $("#setLicForm").classList.add("hidden"); lock(false); return st; }
+    $("#setLicForm").classList.remove("hidden");
+    if (st.state === "expired") { $("#setLicText").textContent = "The 30-day free trial has ended. Enter your activation key."; lock(true); return st; }
+    $("#setLicText").textContent = `Free trial: ${st.daysLeft} ${st.daysLeft === 1 ? "day" : "days"} left. After that, the desktop app needs an activation key. The web app stays free.`;
+    const today = new Date().toDateString();
+    if (first && (st.daysLeft <= 7 || st.daysLeft >= st.trialDays) && store.get("trialNote") !== today) {
+      store.set("trialNote", today);
+      setTimeout(() => toast(`Free trial: ${st.daysLeft} ${st.daysLeft === 1 ? "day" : "days"} left · activate in Settings`), 3500);
+    }
+    return st;
+  }
+  async function activate(key, msgEl) {
+    const r = await D.license.activate(key);
+    if (!r.ok) { if (msgEl) msgEl.textContent = r.error; else toast(r.error); return; }
+    await refresh(); toast(`Activated. Thank you, ${r.name}!`);
+  }
+  $("#lockGo").onclick = () => activate($("#lockKey").value, $("#lockMsg"));
+  $("#setLicGo").onclick = () => activate($("#setLicKey").value);
+  $("#lockGet").onclick = $("#setLicGet").onclick = e => { e.preventDefault(); window.open(KEY_PAGE); };
+  $("#lockWeb").onclick = e => { e.preventDefault(); window.open(C.site || "https://pulsewave.ryanbarnal.com/"); };
+  refresh(true);
+  setInterval(refresh, 3600e3);   // the trial can run out while the app is open
+})();
 
 /* ---------- Leave intro ---------- */
 function enterApp() {

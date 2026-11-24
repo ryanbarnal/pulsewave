@@ -497,3 +497,12 @@ b,strong,h2,h3{font-weight:500}
 :root[data-accent=mono] .np-bg{filter:grayscale(1) brightness(.32) blur(18px)}
 :root[data-accent=mono] .lite .np-bg{filter:grayscale(1) brightness(.32)}
 .np-card img{box-shadow:none;border:1px solid #ffffff1a;border-radius:8px}
+
+/* ===== Activation (desktop app) ===== */
+.lock{position:fixed;inset:0;z-index:200;background:var(--bg);display:grid;place-items:center;padding:16px}
+.lock-box{max-width:420px;width:100%;text-align:center;display:flex;flex-direction:column;gap:12px;align-items:stretch}
+.lock-logo{width:64px;height:64px;border-radius:22%;margin:0 auto 6px}
+.lock-box h2{margin:0;font-weight:400;font-size:22px}
+.lock-box p{margin:0}
+#lockKey{font:12px/1.5 ui-monospace,Menlo,Consolas,monospace;resize:none;text-align:left}
+.lock-links a{color:var(--text)}

@@ -15,6 +15,10 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with: { node-version: 20 }
+      - name: Activation key check
+        shell: bash
+        run: |
+          if grep -q "__LICENSE_PUBLIC_KEY__" main.js; then echo "::error::Set the activation public key in main.js first"; exit 1; fi
       - run: npm install
       - name: Build Windows installer
         if: runner.os == 'Windows'

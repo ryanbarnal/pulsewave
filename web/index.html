@@ -31,6 +31,20 @@
   </div>
 </div>
 
+<!-- ===== Desktop app: trial over, activation needed ===== -->
+<div id="lock" class="lock hidden">
+  <div class="lock-box">
+    <img src="logo.svg" alt="" class="lock-logo">
+    <h2>Your 30-day free trial has ended</h2>
+    <p class="muted">Thanks for trying Pulsewave. Enter your activation key to keep using the desktop app. Your music, playlists and settings are safe and waiting.</p>
+    <textarea id="lockKey" rows="3" placeholder="Paste your activation key (it starts with PW1.)" spellcheck="false"></textarea>
+    <button class="btn primary" id="lockGo">Activate</button>
+    <p class="srv-msg bad" id="lockMsg"></p>
+    <p class="lock-links"><a href="#" id="lockGet">How to get a key</a> · <a href="#" id="lockWeb">Use the free web app</a></p>
+    <p class="muted small">Created by <strong data-credit></strong></p>
+  </div>
+</div>
+
 <!-- ===== App ===== -->
 <div id="app" class="hidden">
   <header class="topbar">
@@ -276,6 +290,10 @@
     <div class="set-row"><b>Visual effects</b>
       <div class="seg" id="setQuality"><button data-v="auto">Auto</button><button data-v="high">Full</button><button data-v="lite">Lite</button><button data-v="off">Off</button></div>
       <p class="set-note" id="setQualityNote"></p></div>
+    <div class="set-row hidden" id="setLicRow"><b>Activation</b>
+      <p class="set-note" id="setLicText"></p>
+      <div class="srv-row" id="setLicForm"><input id="setLicKey" type="text" placeholder="Activation key (PW1.…)" spellcheck="false"><button class="btn primary" id="setLicGo">Activate</button></div>
+      <p class="set-note"><a href="#" id="setLicGet">How to get a key</a></p></div>
     <div class="set-row"><b>Playback</b>
       <label class="switch"><input type="checkbox" id="setAutoplay" checked> Keep playing when a list ends (more songs from your library)</label></div>
     <div class="set-row"><b>Streaming quality (family server)</b>
