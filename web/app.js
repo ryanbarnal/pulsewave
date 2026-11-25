@@ -1973,7 +1973,12 @@ const help = v => $("#helpModal").classList.toggle("hidden", !v);
 $("#helpBtn").onclick = () => help(true); $("#helpClose").onclick = () => help(false);
 $("#helpModal").onclick = e => { if (e.target.id === "helpModal") help(false); };
 addEventListener("keydown", e => {
-  if (appLocked || !$("#intro").classList.contains("hidden") || e.target.matches("input[type=text],input[type=search],select,textarea")) return;
+  if (appLocked || !$("#intro").classList.contains("hidden")) return;
+  // typing in any box: keys belong to the box, never to shortcuts
+  if (e.target.closest && e.target.closest("input:not([type=range]):not([type=checkbox]), select, textarea, [contenteditable]")) return;
+  // a window is open (Family server, Settings, Sync, a question…): only Escape, to close it
+  const openModal = document.querySelector(".modal:not(.hidden)");
+  if (openModal) { if (e.key === "Escape" && openModal.id !== "askModal") openModal.classList.add("hidden"); return; }
   const k = e.key;
   if (k === " ") { e.preventDefault(); toggle(); }
   else if (k === "ArrowRight") { e.preventDefault(); e.shiftKey ? audio.currentTime += 10 : next(false); }
