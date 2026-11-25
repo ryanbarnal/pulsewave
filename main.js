@@ -8,7 +8,7 @@ const crypto = require("crypto");
 /* ---------- 30-day free trial, then an activation key ----------
    Keys are made on the family server (🏠 → Activation keys) and signed there.
    This is only the PUBLIC half: it can check a key, never make one. */
-const LICENSE_PUBLIC_KEY = "__LICENSE_PUBLIC_KEY__";
+const LICENSE_PUBLIC_KEY = "MCowBQYDK2VwAyEAJ//4JdwdUydCmsT3YBq+xK3Q2Hv4m8hKBK13fF6+Bb0=";
 const TRIAL_DAYS = 30, DAY = 864e5;
 const nowMs = () => Date.now() + (!app.isPackaged && process.env.PULSEWAVE_TEST_DAYS ? +process.env.PULSEWAVE_TEST_DAYS * DAY : 0);
 const statePaths = () => [path.join(app.getPath("userData"), "state.json"), path.join(app.getPath("appData"), ".pulsewave-state")];
